@@ -1,0 +1,6 @@
+
+options:
+  port:
+    type: string
+    description: 'Port that coredns will list on'
+    default: '1053'

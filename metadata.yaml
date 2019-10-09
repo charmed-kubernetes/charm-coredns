@@ -1,0 +1,24 @@
+name: coredns
+summary: CoreDNS is a DNS server
+display-name: CoreDNS
+maintainers:
+  - Kevin Monroe <kevin.monroe@canonical.com>
+description: |
+  CoreDNS is a DNS server.
+tags:
+  - k8s
+  - kubernetes
+series:
+   - kubernetes
+resources:
+  coredns-image:
+    type: oci-image
+    description: "CoreDNS image used in the pod."
+    # Instructs layer:docker-resource to automatically fetch this resource.
+    # This will soon be folded into charms.reactive and not be docker specific.
+    auto-fetch: true
+    # This field is an informational only pointer to where an OCI image
+    # which can be used to satisfy this resource can be found. It is
+    # not used in any way by Juju or the Charm Store. It should not be
+    # pinned to a specific image SHA or tag.
+    upstream-source: coredns/coredns
