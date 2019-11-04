@@ -3,4 +3,8 @@ options:
   port:
     type: string
     description: 'Port that coredns will list on'
-    default: '1053'
+    default: '53'
+  dns_domain:
+    type: string
+    description: "DNS domain that will be used"
+    default: 'cluster.local'

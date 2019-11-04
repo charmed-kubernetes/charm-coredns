@@ -10,6 +10,9 @@ tags:
   - kubernetes
 series:
    - kubernetes
+provides:
+  coredns:
+    interface: coredns
 resources:
   coredns-image:
     type: oci-image

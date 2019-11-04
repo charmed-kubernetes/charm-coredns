@@ -1,4 +1,5 @@
 repo: https://github.com/charmed-kubernetes/charm-coredns.git
 includes:
   - "layer:caas-base"
-  - "layer:docker-resource"  # this should be folded into reactive
+  - "layer:docker-resource"  
+  - "interface:coredns"  
