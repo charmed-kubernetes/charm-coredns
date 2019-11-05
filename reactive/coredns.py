@@ -19,8 +19,6 @@ def start_charm():
 
     corefile = Path('files/CoreFile').read_text() % config
 
-    print('COREFILE: {}'.format(corefile))
-    print('PORT: {}'.format(hookenv.config('port')))
     layer.caas_base.pod_spec_set({
         'serviceAccount': {
             'rules': [
@@ -95,6 +93,8 @@ def send_ip():
             if service_ip:
                 coredns.send_ip(service_ip)
                 clear_flag('coredns.joined')
+            else:
+                layer.status.blocked('Unable to get service IP')
     except Exception as e:
         hookenv.log("Failed sending CoreDNS IP: {}".format(e))
 
@@ -106,6 +106,8 @@ def get_service_ip(endpoint):
             addr = info['ingress-addresses'][0]
             if len(addr):
                 return addr
+            else:
+                hookenv.log("No addresses in ingress-addresses: {}".format(info))
         else:
             hookenv.log("No ingress-addresses: {}".format(info))
     except Exception as e:
