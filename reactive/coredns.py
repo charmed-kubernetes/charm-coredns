@@ -7,17 +7,28 @@ from charms.reactive import when, when_not
 from charms import layer
 
 
+@when_not('cluster-dns.joined')
+def wait_for_cluster_dns():
+    layer.status.maintenance('Waiting for cluster dns relation')
+
+
 @when('layer.docker-resource.coredns-image.available')
 @when_not('charm.coredns.started')
+@when('cluster-dns.domain-ready')
 def start_charm():
     layer.status.maintenance('starting workload')
 
     # fetch the image info (registry path, auth info)
     image_info = layer.docker_resource.get_info('coredns-image')
 
+    cluster_dns = endpoint_from_flag('cluster-dns.domain-ready')
+    data = {'dns_domain': cluster_dns.get_domain()}
     config = hookenv.config()
+    data.update(config)
 
-    corefile = Path('files/CoreFile').read_text() % config
+    corefile = Path('files/CoreFile').read_text() % data
+
+    hookenv.log("COREFILE: {}".format(corefile))
 
     layer.caas_base.pod_spec_set({
         'serviceAccount': {
@@ -77,24 +88,24 @@ def start_charm():
 
 @when('layer.docker-resource.coredns-image.changed')
 def update_image():
-    # handle a new image resource becoming available
     clear_flag('charm.coredns.started')
 
 
-@when('charm.coredns.started', 'coredns.joined')
+@when('charm.coredns.started', 'cluster-dns.domain-ready')
 def send_ip():
     """
     Send CoreDNS IP to kuberentes-worker
     """
     try:
-        coredns = endpoint_from_flag('coredns.joined')
-        if coredns:
+        cluster_dns = endpoint_from_flag('cluster-dns.domain-ready')
+        if cluster_dns:
             service_ip = get_service_ip('coredns')
             if service_ip:
-                coredns.send_ip(service_ip)
-                clear_flag('coredns.joined')
+                cluster_dns.send_ip(service_ip)
+                clear_flag('cluster-dns.domain-ready')
+                layer.status.active('ready')
             else:
-                layer.status.blocked('Unable to get service IP')
+                layer.status.maintenance('Unable to get service IP')
     except Exception as e:
         hookenv.log("Failed sending CoreDNS IP: {}".format(e))
 

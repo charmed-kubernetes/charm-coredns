@@ -4,7 +4,7 @@ CoreDNS is a DNS  server. And this is a Kubernetes Charm to deploy CoreDNS on Ku
 
 ## How to build the charm
 
-Make sure you've got the [coredns-interface](https://github.com/DomFleischmann/coredns-interface) in your $CHARM_INTERFACES_DIR and simply build the charm with:
+Make sure you've got the [interface-cluster-dns](https://github.com/charmed-kubernetes/interface-cluster-dns) in your $CHARM_INTERFACES_DIR and simply build the charm with:
 ``` charm build charm-coredns -o ..```
 
 ## How to deploy the charm

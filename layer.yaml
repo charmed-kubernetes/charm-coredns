@@ -2,4 +2,4 @@ repo: https://github.com/charmed-kubernetes/charm-coredns.git
 includes:
   - "layer:caas-base"
   - "layer:docker-resource"  
-  - "interface:coredns"  
+  - "interface:cluster-dns"
