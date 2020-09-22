@@ -46,15 +46,15 @@ jobs:
     - name: Build charm
       run: charmcraft build
     - name: Bootstrap MicroK8s with Juju
-      run: sudo juju bootstrap microk8s microk8s
+      run: juju bootstrap microk8s microk8s
     - name: Add model
-      run: sudo juju add-model coredns microk8s
+      run: juju add-model coredns microk8s
     - name: Deploy CoreDNS
       run: |
         upstream_image=$(yq r metadata.yaml 'resources.coredns-image.upstream-source')
-        sudo juju deploy ./coredns.charm --resource coredns-image=$upstream_image --config forward=8.8.8.8
+        juju deploy ./coredns.charm --resource coredns-image=$upstream_image --config forward=8.8.8.8
     - name: Wait for stable environment
-      run: sudo juju wait -wv
+      run: juju wait -wv
     - name: Tell MicroK8s to use CoreDNS charm
       run: |
         cluster_ip=$(sudo microk8s.kubectl get svc -n coredns coredns -o jsonpath='{..spec.clusterIP}')
@@ -65,6 +65,6 @@ jobs:
     - name: Debug Failures
       if: failure()
       run: |
-        sudo juju debug-log --replay --no-tail -i coredns
+        sudo debug-log --replay --no-tail -i coredns
         sudo microk8s.kubectl get all -A
         sudo microk8s.kubectl logs -n coredns -l juju-app=coredns
