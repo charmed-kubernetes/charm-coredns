@@ -1,1 +1,0 @@
-# this file contains python requirements needed by the charm
