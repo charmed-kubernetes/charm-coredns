@@ -47,7 +47,7 @@ jobs:
     - name: Build charm
       run: charmcraft build
     - name: Bootstrap MicroK8s with Juju
-      run: sg microk8s juju bootstrap microk8s microk8s
+      run: sg microk8s 'juju bootstrap microk8s microk8s'
     - name: Add model
       run: juju add-model coredns microk8s
     - name: Deploy CoreDNS
