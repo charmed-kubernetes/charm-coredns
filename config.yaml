@@ -7,6 +7,10 @@ options:
     description: Where to forward non-cluster addresses.
     type: string
     default: /etc/resolv.conf
+  extra_servers:
+    description: Any additional servers to add to the Corefile.
+    type: string
+    default: ''
   corefile:
     description: >-
       Configuration file to use for CoreDNS. This is interpreted as a Python
@@ -31,3 +35,4 @@ options:
           reload
           loadbalance
       }
+      ${extra_servers}

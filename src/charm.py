@@ -35,10 +35,8 @@ class CoreDNSCharm(CharmBase):
 
         self.model.unit.status = MaintenanceStatus('Setting pod spec')
 
-        domain = self.model.config['domain']
-        forward = self.model.config['forward']
         corefile = Template(self.model.config['corefile'])
-        corefile = corefile.safe_substitute(domain=domain, forward=forward)
+        corefile = corefile.safe_substitute(self.model.config)
 
         # Adapted from coredns.yaml.sed in https://github.com/coredns/ at 75a1cad
         self.model.pod.set_spec({
