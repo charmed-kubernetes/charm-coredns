@@ -30,6 +30,16 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: 3.8
+    - name: Fix global gitconfig for confined snap
+      run: |
+        # GH automatically includes the git-lfs plugin and configures it in
+        # /etc/gitconfig.  However, the confinement of the charmcraft snap
+        # means that it can see that this file exists but cannot read it, even
+        # if the file permissions should allow it; this breaks git usage within
+        # the snap. To get around this, we move it from the global gitconfig to
+        # the user's .gitconfig file.
+        cat /etc/gitconfig >> $HOME/.gitconfig
+        sudo rm /etc/gitconfig
     - name: Install MicroK8s
       uses: balchua/microk8s-actions@v0.1.3
       with:
@@ -38,14 +48,17 @@ jobs:
         dns: 'true'  # required for juju, will adjust later
     - name: Install Dependencies
       run: |
-        pip install tox
-        sudo snap install charmcraft --channel beta
+        script/bootstrap
         sudo snap install juju --classic
         sudo snap install juju-wait --classic
-        sudo snap install yq
         sudo usermod -aG microk8s $USER
     - name: Build charm
-      run: charmcraft build
+      run: |
+        if ! make charm; then
+          echo Build failed, full log:
+          cat "$(ls -1t "$HOME"/snap/charmcraft/common/charmcraft-log-* | head -n1)"
+          exit 1
+        fi
     - name: Bootstrap MicroK8s with Juju
       run: sg microk8s 'juju bootstrap microk8s microk8s'
     - name: Add model
