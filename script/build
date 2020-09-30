@@ -6,7 +6,7 @@ export PATH=/snap/bin:$PATH
 
 mkdir -p "$CHARM_BUILD_DIR"
 
-CHARM_SRC="$(realpath "charms/$CHARM")"
+CHARM_SRC="$(realpath .)"
 CHARM_DST="$CHARM_BUILD_DIR/$CHARM.charm"
 CHARM_DST_UNZIP="$CHARM_BUILD_DIR/$CHARM"
 
