@@ -49,6 +49,7 @@ jobs:
     - name: Install Dependencies
       run: |
         script/bootstrap
+        pip install tox
         sudo snap install juju --classic
         sudo snap install juju-wait --classic
         sudo usermod -aG microk8s $USER
