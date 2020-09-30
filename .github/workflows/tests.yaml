@@ -22,7 +22,7 @@ jobs:
   func-test:
     name: Functional test with MicroK8s
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
     - name: Check out code
       uses: actions/checkout@v2
