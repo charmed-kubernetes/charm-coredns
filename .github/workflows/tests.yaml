@@ -76,9 +76,15 @@ jobs:
         sudo systemctl restart snap.microk8s.daemon-kubelet
     - name: Run functional test
       run: tox -e func
-    - name: Debug Failures
+    - name: Juju Status
       if: failure()
-      run: |
-        sudo debug-log --replay --no-tail -i coredns
-        sudo microk8s.kubectl get all -A
-        sudo microk8s.kubectl logs -n coredns -l juju-app=coredns
+      run: sudo juju status
+    - name: Juju Log
+      if: failure()
+      run: sudo juju debug-log --replay --no-tail -i coredns
+    - name: Microk8s Status
+      if: failure()
+      run: sudo microk8s.kubectl get all -A
+    - name: Microk8s Pod Log
+      if: failure()
+      run: sudo microk8s.kubectl logs -n coredns -l juju-app=coredns
