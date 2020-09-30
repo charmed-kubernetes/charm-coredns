@@ -1,5 +1,5 @@
 CHANNEL ?= unpublished
-CHARM_BUILD_DIR ?= ./build
+CHARM_BUILD_DIR ?= .
 CHARM ?= coredns
 
 setup-env:
