@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -e
+
+export PATH=/snap/bin:$PATH
+
+mkdir -p "$CHARM_BUILD_DIR"
+
+CHARM_SRC="$(realpath .)"
+CHARM_DST="$CHARM_BUILD_DIR/$CHARM.charm"
+CHARM_DST_UNZIP="$CHARM_BUILD_DIR/$CHARM"
+
+# Use pip version of charmcraft if available due to
+# issue with non-standard HOME causing problems in CI:
+# https://forum.snapcraft.io/t/support-for-non-home-homedirs/11209
+if [[ -x "$VIRTUAL_ENV/bin/charmcraft" ]]; then
+    # Use charmcraft from the active venv
+    CHARMCRAFT="$VIRTUAL_ENV/bin/charmcraft"
+elif [[ -x $HOME/.local/bin/charmcraft ]]; then
+    # Use charmcraft from user pacakage
+    CHARMCRAFT="$HOME/.local/bin/charmcraft"
+else
+    # Use charmcraft snap
+    CHARMCRAFT="/snap/bin/charmcraft"
+fi
+
+echo "Building $CHARM..."
+(cd "$CHARM_BUILD_DIR" && "$CHARMCRAFT" build -f "$CHARM_SRC" 2>&1) | sed -e "s,in '.*,in '$CHARM_DST',"
+build_exit_code=${PIPESTATUS[0]}
+if [[ $build_exit_code != 0 ]]; then
+    exit "$build_exit_code"
+fi
+
+if [[ "$HOME" == *jenkins* ]]; then
+    # also provide unzipped version for `charm push` for Jenkins
+    echo "Unpacking $CHARM_DST to $CHARM_DST_UNZIP..."
+    rm -rf "$CHARM_DST_UNZIP"
+    mkdir -p "$CHARM_DST_UNZIP"
+    unzip -q "$CHARM_DST" -d "$CHARM_DST_UNZIP"
+    echo "Done."
+fi

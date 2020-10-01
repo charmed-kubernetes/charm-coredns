@@ -1,0 +1,91 @@
+name: Test Suite for CoreDNS
+
+on:
+  - pull_request
+
+jobs:
+  lint-and-unit-tests:
+    name: Lint & Unit tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Install Tox
+      run: pip install tox
+    - name: Run lint & unit tests
+      run: tox
+
+  func-test:
+    name: Functional test with MicroK8s
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Fix global gitconfig for confined snap
+      run: |
+        # GH automatically includes the git-lfs plugin and configures it in
+        # /etc/gitconfig.  However, the confinement of the charmcraft snap
+        # means that it can see that this file exists but cannot read it, even
+        # if the file permissions should allow it; this breaks git usage within
+        # the snap. To get around this, we move it from the global gitconfig to
+        # the user's .gitconfig file.
+        cat /etc/gitconfig >> $HOME/.gitconfig
+        sudo rm /etc/gitconfig
+    - name: Install MicroK8s
+      uses: balchua/microk8s-actions@v0.1.3
+      with:
+        rbac: 'true'
+        storage: 'true'
+        dns: 'true'  # required for juju, will adjust later
+    - name: Install Dependencies
+      run: |
+        script/bootstrap
+        pip install tox
+        sudo snap install juju --classic
+        sudo snap install juju-wait --classic
+        sudo usermod -aG microk8s $USER
+    - name: Build charm
+      run: |
+        if ! make charm; then
+          echo Build failed, full log:
+          cat "$(ls -1t "$HOME"/snap/charmcraft/common/charmcraft-log-* | head -n1)"
+          exit 1
+        fi
+    - name: Bootstrap MicroK8s with Juju
+      run: sg microk8s 'juju bootstrap microk8s microk8s'
+    - name: Add model
+      run: juju add-model coredns microk8s
+    - name: Deploy CoreDNS
+      run: |
+        upstream_image=$(yq r metadata.yaml 'resources.coredns-image.upstream-source')
+        juju deploy ./coredns.charm --resource coredns-image=$upstream_image --config forward=8.8.8.8
+    - name: Wait for stable environment
+      run: juju wait -wv
+    - name: Tell MicroK8s to use CoreDNS charm
+      run: |
+        cluster_ip=$(sudo microk8s.kubectl get svc -n coredns coredns -o jsonpath='{..spec.clusterIP}')
+        sudo sed -i -e "s/--cluster-dns=.*/--cluster-dns=$cluster_ip/" /var/snap/microk8s/current/args/kubelet
+        sudo systemctl restart snap.microk8s.daemon-kubelet
+    - name: Run functional test
+      run: tox -e func
+    - name: Juju Status
+      if: failure()
+      run: sudo juju status
+    - name: Juju Log
+      if: failure()
+      run: sudo juju debug-log --replay --no-tail -i coredns
+    - name: Microk8s Status
+      if: failure()
+      run: sudo microk8s.kubectl get all -A
+    - name: Microk8s Pod Log
+      if: failure()
+      run: sudo microk8s.kubectl logs -n coredns -l juju-app=coredns
