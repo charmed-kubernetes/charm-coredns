@@ -6,7 +6,7 @@ export PATH=/snap/bin:$PATH
 
 mkdir -p "$CHARM_BUILD_DIR"
 
-CHARM_SRC="$(realpath "$CHARM")"
+CHARM_SRC="$(realpath .)"
 
 echo "Building $CHARM..."
 (cd "$CHARM_BUILD_DIR" && charmcraft build -f "$CHARM_SRC" 2>&1) | sed -e "s,in ',in '$CHARM_BUILD_DIR/,"
