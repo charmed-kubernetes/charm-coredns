@@ -1,6 +1,5 @@
 #!/bin/bash
-
-set -e
+set -eu
 
 export PATH="/snap/bin:$PATH"
 

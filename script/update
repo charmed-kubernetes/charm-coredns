@@ -1,4 +1,5 @@
 #!/bin/bash
+set -eu
 
 echo "Verifying dependencies"
 if ! which pipenv > /dev/null; then
