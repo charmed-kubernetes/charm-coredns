@@ -22,4 +22,5 @@ echo "Attached: $IMAGE_NAME-$IMAGE_REV"
 
 if [ "$CHANNEL" != unpublished ]; then
    charm release "$URL" --channel "$CHANNEL" --resource "$IMAGE_NAME"-"$IMAGE_REV"
+   echo "Released to: $CHANNEL"
 fi
