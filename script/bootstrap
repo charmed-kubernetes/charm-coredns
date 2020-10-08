@@ -1,23 +1,19 @@
 #!/bin/bash
 
+set -e
+
 export PATH="/snap/bin:$PATH"
 
 if [[ "$(snap whoami)" == "email: -" ]]; then
-    snap_sudo="sudo"
+    snap="sudo snap"
 else
-    snap_sudo=""
+    snap="snap"
 fi
 
 echo "Verifying dependencies..."
-apt_updated=false
-if ! (which docker && which make && which unzip) > /dev/null; then
+if ! (which make && which unzip) > /dev/null; then
     echo "Updating apt..."
     sudo apt update -yqq
-    apt_updated=true
-fi
-if ! which docker > /dev/null; then
-    echo "Installing docker..."
-    sudo apt install -qyf docker.io
 fi
 if ! which make > /dev/null; then
     echo "Installing make..."
@@ -27,32 +23,15 @@ if ! which unzip > /dev/null; then
     echo "Installing unzip..."
     sudo apt install -qyf unzip
 fi
-if [[ "$HOME" != "/home/"* ]]; then
-    # If we're in an environment that has a non-/home HOME (like Jenkins),
-    # then we have to use the pip installed charmcraft due to:
-    # https://forum.snapcraft.io/t/support-for-non-home-homedirs/11209
-    if ! which pip3 > /dev/null; then
-        if [[ $apt_updated == "false" ]]; then
-            echo "Updating apt..."
-            sudo apt update -yqq
-            apt_updated=true
-        fi
-        echo "Installing python3-pip..."
-        sudo apt install -qyf python3-pip
-    fi
-    if [[ -z "$VIRTUAL_ENV" ]]; then
-        echo "Installing charmcraft as user package..."
-        pip3 install --user charmcraft
-    else
-        echo "Installing charmcraft into venv..."
-        # Can just install directly into the active venv
-        pip3 install charmcraft
-    fi
-elif ! which charmcraft > /dev/null; then
+if ! which docker > /dev/null; then
+    echo "Installing docker..."
+    $snap install docker
+fi
+if ! which charmcraft > /dev/null; then
     echo "Installing charmcraft snap..."
-    $snap_sudo snap install charmcraft --beta
+    $snap install charmcraft --beta
 fi
 if ! which yq > /dev/null; then
     echo "Installing yq..."
-    $snap_sudo snap install yq
+    $snap install yq
 fi
