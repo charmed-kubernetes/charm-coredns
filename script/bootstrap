@@ -10,7 +10,7 @@ else
 fi
 
 echo "Verifying dependencies..."
-if ! (which make && which unzip) > /dev/null; then
+if ! (which docker && which make && which unzip) > /dev/null; then
     echo "Updating apt..."
     sudo apt update -yqq
 fi
@@ -24,11 +24,15 @@ if ! which unzip > /dev/null; then
 fi
 if ! which docker > /dev/null; then
     echo "Installing docker..."
-    $snap install docker
+    sudo apt install -qyf docker.io
 fi
 if ! which charmcraft > /dev/null; then
     echo "Installing charmcraft snap..."
     $snap install charmcraft --beta
+fi
+if ! which charm > /dev/null; then
+    echo "Installing charm snap..."
+    $snap install charm --edge --classic
 fi
 if ! which yq > /dev/null; then
     echo "Installing yq..."
