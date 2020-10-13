@@ -1,8 +1,6 @@
 #!/bin/bash
 set -eu
 
-export PATH=/snap/bin:$PATH
-
 if ! charm whoami > /dev/null; then
     echo "Not logged into charm store" 2>&1
     exit 1

@@ -1,8 +1,6 @@
 #!/bin/bash
 set -eu
 
-export PATH=/snap/bin:$PATH
-
 mkdir -p "$CHARM_BUILD_DIR"
 
 CHARM_SRC="$(realpath .)"
