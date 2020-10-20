@@ -48,14 +48,15 @@ jobs:
         dns: 'true'  # required for juju, will adjust later
     - name: Install Dependencies
       run: |
-        script/bootstrap
         pip install tox
         sudo snap install juju --classic
         sudo snap install juju-wait --classic
         sudo usermod -aG microk8s $USER
+        sudo snap install charmcraft --beta
+        sudo snap install yq
     - name: Build charm
       run: |
-        if ! make charm; then
+        if ! charmcraft build; then
           echo Build failed, full log:
           cat "$(ls -1t "$HOME"/snap/charmcraft/common/charmcraft-log-* | head -n1)"
           exit 1
