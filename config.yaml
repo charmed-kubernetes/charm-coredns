@@ -14,7 +14,7 @@ options:
   corefile:
     description: >-
       Configuration file to use for CoreDNS. This is interpreted as a Python
-      string.Template which will be given the `domain` and `forward` configs as
+      string. Template which will be given the `domain` and `forward` configs as
       its context.
     type: string
     default: |
