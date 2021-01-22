@@ -1,7 +1,7 @@
 # CoreDNS Operator
 
 [CoreDNS][] is a flexible, plugin-based DNS server, and is the recommended
-solution for providing DNS to Kubernetes services withiin the cluster.
+solution for providing DNS to Kubernetes services within the cluster.
 This operator enables integration with [Charmed Kubernetes][] via a
 cross-model relation and allows for more customization than provided by the
 deployment of CoreDNS provided by default by Charmed Kubernetes.
