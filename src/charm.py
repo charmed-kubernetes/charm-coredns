@@ -1,197 +1,115 @@
 #!/usr/bin/env python3
+# Copyright 2021 Ubuntu
+# See LICENSE file for licensing details.
+#
+# Learn more at: https://juju.is/docs/sdk
 
 import logging
 from string import Template
 
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
+from ops.model import ActiveStatus, WaitingStatus, ModelError
+from ops.pebble import ServiceStatus
 
-from oci_image import OCIImageResource, OCIImageResourceError
+logger = logging.getLogger(__name__)
 
 
-class CoreDNSCharm(CharmBase):
+class CharmCoreDNS(CharmBase):
+    """CoreDNS Sidecar Charm"""
+
+    _COREDNS_CONTAINER = "coredns"
+
     def __init__(self, *args):
         super().__init__(*args)
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = WaitingStatus('Waiting for leadership')
-            return
-        self.log = logging.getLogger(__name__)
-        self.image = OCIImageResource(self, 'coredns-image')
-        for event in [self.on.install,
-                      self.on.leader_elected,
-                      self.on.upgrade_charm,
-                      self.on.config_changed]:
-            self.framework.observe(event, self.main)
-        self.framework.observe(self.on.dns_provider_relation_joined, self.provide_dns)
+        self.framework.observe(self.on.coredns_pebble_ready,
+                               self._on_coredns_pebble_ready)
+        self.framework.observe(self.on.config_changed,
+                               self._on_config_changed)
+        self.framework.observe(self.on.dns_provider_relation_changed,
+                               self._on_dns_provider_relation_changed)
+        self.framework.observe(self.on.update_status,
+                               self._on_update_status)
 
-    def main(self, event):
-        try:
-            image_details = self.image.fetch()
-        except OCIImageResourceError as e:
-            self.model.unit.status = e.status
+    def _on_coredns_pebble_ready(self, event):
+        """Define and start CoreDNS workload"""
+        container = event.workload
+        if self._is_running(container, self._COREDNS_CONTAINER):
+            logger.info("CoreDNS already started")
             return
 
-        self.model.unit.status = MaintenanceStatus('Setting pod spec')
+        layer = self._coredns_layer()
+        container.add_layer(self._COREDNS_CONTAINER, layer)
+        self._push_corefile_config(event)
+        container.autostart()
+        self._on_update_status(event)
 
-        corefile = Template(self.model.config['corefile'])
-        corefile = corefile.safe_substitute(self.model.config)
+    def _on_config_changed(self, event):
+        """Process charm config changes and restart CoreDNS workload"""
+        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        if not self._is_running(container, self._COREDNS_CONTAINER):
+            logger.info("CoreDNS is not running")
+            return
 
-        # Adapted from coredns.yaml.sed in https://github.com/coredns/ at 75a1cad
-        self.model.pod.set_spec({
-            'version': 3,
-            'service': {
-                'updateStrategy': {
-                    'type': 'RollingUpdate',
-                    'rollingUpdate': {'maxUnavailable': 1},
-                },
-                'annotations': {
-                    'prometheus.io/port': "9153",
-                    'prometheus.io/scrape': "true",
-                },
-            },
-            # Dropped by a regression; see:
-            # https://bugs.launchpad.net/juju/+bug/1895886
-            # 'priorityClassName': 'system-cluster-critical',
-            'containers': [{
-                'name': 'coredns',
-                'imageDetails': image_details,
-                'imagePullPolicy': 'IfNotPresent',
-                'args': ['-conf', '/etc/coredns/Corefile'],
-                'volumeConfig': [{
-                    'name': 'config-volume',
-                    'mountPath': '/etc/coredns',
-                    # Not supported
-                    # 'readOnly': True,
-                    'files': [{
-                        'path': 'Corefile',
-                        'mode': 0o444,
-                        'content': corefile,
-                    }],
-                }],
-                'ports': [
-                    {
-                        'name': 'dns',
-                        'containerPort': 53,
-                        'protocol': 'UDP',
-                    },
-                    {
-                        'name': 'dns-tcp',
-                        'containerPort': 53,
-                        'protocol': 'TCP',
-                    },
-                    {
-                        'name': 'metrics',
-                        'containerPort': 9153,
-                        'protocol': 'TCP',
-                    },
-                ],
-                # Can't be specified by the charm yet; see:
-                # https://bugs.launchpad.net/juju/+bug/1893123
-                # 'resources': {
-                #     'limits': {'memory': '170Mi'},
-                #     'requests': {'cpu': '100m', 'memory': '70Mi'},
-                # },
-                'kubernetes': {
-                    'securityContext': {
-                        'allowPrivilegeEscalation': False,
-                        'capabilities': {
-                            'add': ['NET_BIND_SERVICE'],
-                            'drop': ['all'],
-                        },
-                        'readOnlyRootFilesystem': True,
-                    },
-                    'livenessProbe': {
-                        'httpGet': {
-                            'path': '/health',
-                            'port': 8080,
-                            'scheme': 'HTTP',
-                        },
-                        'initialDelaySeconds': 60,
-                        'timeoutSeconds': 5,
-                        'successThreshold': 1,
-                        'failureThreshold': 5,
-                    },
-                    'readinessProbe': {
-                        'httpGet': {
-                            'path': '/ready',
-                            'port': 8181,
-                            'scheme': 'HTTP',
-                        },
-                    },
-                },
-            }],
-            'serviceAccount': {
-                'roles': [{
-                    'global': True,
-                    'rules': [
-                        {
-                            'apigroups': [''],
-                            'resources': [
-                                'endpoints',
-                                'services',
-                                'pods',
-                                'namespaces',
-                            ],
-                            'verbs': ['list', 'watch'],
-                        },
-                        {
-                            'apigroups': [''],
-                            'resources': ['nodes'],
-                            'verbs': ['get'],
-                        },
-                    ],
-                }],
-            },
-            'kubernetesResources': {
-                'pod': {
-                    'dnsPolicy': 'Default',
-                    # Not yet supported by Juju; see:
-                    # https://bugs.launchpad.net/juju/+bug/1895887
-                    # 'tolerations': [{
-                    #     'key': 'CriticalAddonsOnly',
-                    #     'operator': 'Exists',
-                    # }],
-                    # 'affinity': {
-                    #      'podAntiAffinity': {
-                    #          'preferredDuringScheduling' +
-                    #          'IgnoredDuringExecution': [{
-                    #               'weight': 100,
-                    #               'podAffinityTerm': {
-                    #                   'labelSelector': {
-                    #                       'matchExpressions': [{
-                    #                           'key': 'k8s-app',
-                    #                           'operator': 'In',
-                    #                           'values': ["kube-dns"],
-                    #                       }],
-                    #                   },
-                    #                   'topologyKey': 'kubernetes.io/hostname',
-                    #               },
-                    #          }],
-                    #      },
-                    # },
-                    # Can be done by the operator via placement (--to), but can't
-                    # be specified by the charm yet, per same bug as above.
-                    # 'nodeSelector': {
-                    #     'kubernetes.io/os': 'linux',
-                    # },
-                }
-            }
-        })
-        self.model.unit.status = ActiveStatus()
+        self._push_corefile_config(event)
+        container.stop(self._COREDNS_CONTAINER)
+        container.start(self._COREDNS_CONTAINER)
+        self._on_update_status(event)
 
-    def provide_dns(self, event):
+    def _on_dns_provider_relation_changed(self, event):
+        """Provide relation data on dns-provider relation"""
         provided_data = event.relation.data[self.unit]
-        if not provided_data.get('ingress-address'):
-            event.defer()
-            return
+        # TODO(coreycb): Use ingress address instead of bind address
+        #                https://pad.lv/1922133
+        ingress_address = self.model.get_binding(
+            event.relation).network.bind_address
         provided_data.update({
-            'domain': self.model.config['domain'],
-            'sdn-ip': str(provided_data['ingress-address']),
-            'port': "53",
+            "domain": self.model.config["domain"],
+            "sdn-ip": str(ingress_address),
+            "port": "53",
         })
+        self._on_update_status(event)
+
+    def _on_update_status(self, event):
+        """Update Juju status"""
+        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        if not self.model.get_relation('dns-provider'):
+            self.unit.status = WaitingStatus("Awaiting dns-provider relation")
+        elif not self._is_running(container, self._COREDNS_CONTAINER):
+            self.unit.status = WaitingStatus("CoreDNS is not running")
+        else:
+            self.unit.status = ActiveStatus("CoreDNS started")
+
+    def _coredns_layer(self):
+        """Pebble config layer for CoreDNS"""
+        return {
+            "summary": "CoreDNS layer",
+            "description": "pebble config layer for CoreDNS",
+            "services": {
+                self._COREDNS_CONTAINER: {
+                    "override": "replace",
+                    "summary": "CoreDNS",
+                    "command": "/coredns -conf /etc/coredns/Corefile",
+                    "startup": "enabled",
+                }
+            },
+        }
+
+    def _push_corefile_config(self, event):
+        """Push corefile config to CoreDNS container"""
+        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        corefile = Template(self.model.config["corefile"])
+        corefile = corefile.safe_substitute(self.model.config)
+        container.push("/etc/coredns/Corefile", corefile, make_dirs=False)
+
+    def _is_running(self, container, service):
+        """Determine if a given service is running in a given container"""
+        try:
+            service = container.get_service(service)
+        except ModelError:
+            return False
+        return service.current == ServiceStatus.ACTIVE
 
 
 if __name__ == "__main__":
-    main(CoreDNSCharm)
+    main(CharmCoreDNS)

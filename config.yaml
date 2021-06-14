@@ -1,3 +1,8 @@
+# Copyright 2021 Ubuntu
+# See LICENSE file for licensing details.
+#
+# Learn more about config at: https://juju.is/docs/sdk/config
+
 options:
   domain:
     description: The local domain for cluster DNS.

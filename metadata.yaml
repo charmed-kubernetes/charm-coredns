@@ -1,21 +1,35 @@
-name: coredns
-summary: CoreDNS
-maintainers:
-  - Cory Johns <cory.johns@canonical.com>
-description: |
-  CoreDNS provides DNS resolution for Kubernetes.
+# Copyright 2021 Ubuntu
+# See LICENSE file for licensing details.
+name: corey-coredns
+description: CoreDNS
+summary: CoreDNS provides DNS resolution for Kubernetes
 tags:
   - networking
-series:
-  - kubernetes
-provides:
-  dns-provider:
-    interface: kube-dns
-requires: {}
-peers: {}
+
+docs: https://discourse.charmhub.io/t/corey-coredns-docs-index/4730
+
+containers:
+  coredns:
+    resource: coredns-image
+    mounts:
+      - storage: config
+        location: /etc/coredns/
+
 resources:
   coredns-image:
     type: oci-image
     description: 'CoreDNS image'
-    upstream-source: coredns/coredns:1.6.7
-min-juju-version: 2.8.2
+    upstream-source: coredns/coredns:1.8.4
+
+storage:
+  config:
+    type: filesystem
+    location: /etc/coredns/
+
+provides:
+  dns-provider:
+    interface: kube-dns
+
+peers:
+  replicas:
+    interface: coredns-peer
