@@ -100,7 +100,7 @@ class CharmCoreDNS(CharmBase):
         container = self.unit.get_container(self._COREDNS_CONTAINER)
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
-        container.push("/etc/coredns/Corefile", corefile, make_dirs=False)
+        container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
 
     def _is_running(self, container, service):
         """Determine if a given service is running in a given container"""

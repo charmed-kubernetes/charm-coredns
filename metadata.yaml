@@ -11,20 +11,12 @@ docs: https://discourse.charmhub.io/t/corey-coredns-docs-index/4730
 containers:
   coredns:
     resource: coredns-image
-    mounts:
-      - storage: config
-        location: /etc/coredns/
 
 resources:
   coredns-image:
     type: oci-image
     description: 'CoreDNS image'
     upstream-source: coredns/coredns:1.8.4
-
-storage:
-  config:
-    type: filesystem
-    location: /etc/coredns/
 
 provides:
   dns-provider:
