@@ -127,6 +127,13 @@ class CoreDNSCharm(CharmBase):
                     'global': True,
                     'rules': [
                         {
+                            'apigroups': ['discovery.k8s.io'],
+                            'resources': [
+                                'endpointslices',
+                            ],
+                            'verbs': ['list', 'watch'],
+                        },
+                        {
                             'apigroups': [''],
                             'resources': [
                                 'endpoints',

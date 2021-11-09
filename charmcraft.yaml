@@ -1,0 +1,6 @@
+type: charm
+parts:
+  charm:
+    build-packages: [git]
+    prime:
+      - ./files/*
