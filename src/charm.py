@@ -15,7 +15,7 @@ class CoreDNSCharm(CharmBase):
         super().__init__(*args)
         if not self.unit.is_leader():
             # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = WaitingStatus('Waiting for leadership')
+            self.model.unit.status = ActiveStatus()
             return
         self.log = logging.getLogger(__name__)
         self.image = OCIImageResource(self, 'coredns-image')
