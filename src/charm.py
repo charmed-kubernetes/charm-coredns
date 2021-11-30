@@ -5,7 +5,7 @@ from string import Template
 
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
+from ops.model import ActiveStatus, MaintenanceStatus
 
 from oci_image import OCIImageResource, OCIImageResourceError
 

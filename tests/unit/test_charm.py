@@ -1,6 +1,6 @@
 import pytest
 
-from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus
 from ops.testing import Harness
 import yaml
 
@@ -20,7 +20,7 @@ def harness():
 
 def test_not_leader(harness):
     harness.begin()
-    assert isinstance(harness.charm.model.unit.status, WaitingStatus)
+    assert isinstance(harness.charm.model.unit.status, ActiveStatus)
 
 
 def test_missing_image(harness):
