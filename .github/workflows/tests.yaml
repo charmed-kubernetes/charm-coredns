@@ -22,11 +22,17 @@ jobs:
   func-test:
     name: Functional test with MicroK8s
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
     - name: Check out repo
       uses: actions/checkout@v2
+
+    - name: Install LXD
+      run: |
+        set -eux
+        sudo snap refresh lxd --classic --channel=latest/stable
+        sudo usermod -a -G lxd $USER
+        sudo lxd init --auto
 
     - name: Install MicroK8s
       uses: balchua/microk8s-actions@v0.2.2
@@ -37,10 +43,10 @@ jobs:
     - name: Install Dependencies
       run: |
         set -eux
-        sudo snap install charmcraft --classic --channel=latest/candidate
+        sudo snap install charmcraft --classic --channel=latest/edge
         sudo snap install juju --classic
         sudo snap install juju-wait --classic
-        sudo snap install yq
+        sudo snap list
         sudo apt update
         sudo apt install tox
 
@@ -55,35 +61,24 @@ jobs:
         sg microk8s 'juju bootstrap microk8s microk8s'
         sg microk8s 'juju add-model coredns microk8s'
 
-    - name: Build charm
+    - name: Run Integration tests
       run: |
-        charmcraft pack --destructive-mode
-
-    - name: Deploy CoreDNS
-      run: |
-        upstream_image=$(yq eval '.resources.coredns-image.upstream-source' metadata.yaml)
-        juju deploy ./coredns_ubuntu-20.04-amd64.charm --resource coredns-image=$upstream_image --config forward=8.8.8.8
-
-    - name: Wait for stable environment
-      run: juju wait -wv
-
-    - name: Tell MicroK8s to use CoreDNS charm
-      run: |
-        cluster_ip=$(sudo microk8s.kubectl get svc -n coredns coredns -o jsonpath='{..spec.clusterIP}')
-        sudo sed -i -e "s/--cluster-dns=.*/--cluster-dns=$cluster_ip/" /var/snap/microk8s/current/args/kubelet
-        sudo systemctl restart snap.microk8s.daemon-kubelet
-
-    - name: Run functional test
-      run: tox -e func
+        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns
+      timeout-minutes: 20
 
     - name: Setup Debug Artifact Collection
       run: mkdir tmp
       if: failure()
 
+    - name: Collect pytest logs
+      if: failure()
+      run: cat .tox/integration/log/pytest-* | tee tmp/pytest.log
+
     - name: Collect charmcraft logs
       if: failure()
-      run: cat /home/runner/snap/charmcraft/common/charmcraft-log-* | tee tmp/charmcraft.log
-
+      run: |
+        cat /home/runner/snap/charmcraft/common/cache/charmcraft/log/charmcraft-* | tee tmp/charmcraft.log
+        cat /home/runner/snap/charmcraft/common/charmcraft-log-* | tee tmp/charmcraft.log
     - name: Collect Juju status
       if: failure()
       run: juju status | tee tmp/juju-status.txt
