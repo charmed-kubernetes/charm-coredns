@@ -5,7 +5,7 @@ from string import Template
 
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, MaintenanceStatus, WaitingStatus
+from ops.model import ActiveStatus, MaintenanceStatus
 
 from oci_image import OCIImageResource, OCIImageResourceError
 
@@ -15,7 +15,7 @@ class CoreDNSCharm(CharmBase):
         super().__init__(*args)
         if not self.unit.is_leader():
             # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = WaitingStatus('Waiting for leadership')
+            self.model.unit.status = ActiveStatus()
             return
         self.log = logging.getLogger(__name__)
         self.image = OCIImageResource(self, 'coredns-image')
