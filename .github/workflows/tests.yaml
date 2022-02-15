@@ -60,10 +60,11 @@ jobs:
       run: |
         sg microk8s 'juju bootstrap microk8s microk8s'
         sg microk8s 'juju add-model coredns microk8s'
+        sg microk8s 'juju add-model coredns-client microk8s'
 
     - name: Run Integration tests
       run: |
-        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns
+        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns --client-model=coredns-client
       timeout-minutes: 20
 
     - name: Setup Debug Artifact Collection

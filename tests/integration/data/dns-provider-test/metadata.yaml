@@ -1,0 +1,17 @@
+name: dns-provider-test
+display-name: DNS-provider Test
+description: Test for dns-provider relation
+summary: Test for dns-provider relation
+containers:
+  httpbin:
+    resource: httpbin-image
+
+resources:
+  httpbin-image:
+    type: oci-image
+    description: OCI image for httpbin (kennethreitz/httpbin)
+
+requires:
+  dns-provider:
+    interface: kube-dns
+
