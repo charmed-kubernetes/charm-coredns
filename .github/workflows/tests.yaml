@@ -100,8 +100,8 @@ jobs:
     - name: Collect Kube logs
       if: failure()
       run: |
-        kubectl logs -n coredns -l juju-app=coredns | tee tmp/coredns.log
-        kubectl logs -n coredns-client -l juju-app=dns-provider-test | tee tmp/dns-provider-test.log
+        kubectl logs -n coredns | tee tmp/coredns.log
+        kubectl logs -n coredns-client | tee tmp/dns-provider-test.log
 
     - name: Upload debug artifacts
       if: failure()
