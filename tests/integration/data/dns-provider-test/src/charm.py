@@ -5,6 +5,7 @@ from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus, ModelError
+from ops.pebble import ServiceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +33,13 @@ class DnsProviderTestCharm(CharmBase):
 
     @property
     def is_running(self):
+        """Determine if a given service is running in a given container"""
         try:
             container = self.unit.get_container("httpbin")
-            return (
-                container.can_connect()
-                and container.get_service("httpbin").is_running()
-            )
+            service = container.get_service("httpbin")
         except ModelError:
             return False
+        return service.current == ServiceStatus.ACTIVE
 
     def _on_install(self, event):
         if not self.is_running:

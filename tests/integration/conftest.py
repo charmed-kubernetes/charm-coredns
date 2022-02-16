@@ -4,6 +4,8 @@ from random import choices
 from string import ascii_lowercase, digits
 import juju.model
 import logging
+from pathlib import Path
+from juju.tag import untag
 
 logger = logging.getLogger(__name__)
 
@@ -63,3 +65,56 @@ async def client_model(ops_test, request):
         await model.disconnect()
         if not ops_test.keep_client_model:
             await ops_test._controller.destroy_model(model_name)
+
+
+@pytest_asyncio.fixture
+async def coredns_test_app(ops_test, client_model):
+    base_path = Path(__file__).parent
+    charm_path = base_path / "data/dns-provider-test"
+    charm = await ops_test.build_charm(charm_path)
+    charm_resources = {"httpbin-image": "kennethreitz/httpbin"}
+    app = await client_model.deploy(charm, resources=charm_resources)
+
+    await client_model.block_until(lambda: len(app.units) == 1, timeout=10 * 60)
+    # Test app goes to waiting status until the relation is created
+    await client_model.wait_for_idle(
+        status="waiting", raise_on_blocked=True, timeout=300
+    )
+    return app
+
+
+@pytest_asyncio.fixture
+async def related_app(ops_test, client_model, coredns_test_app):
+    offer, saas, relation = None, None, None
+    logger.info("Creating CMR offer")
+    offer = await ops_test.model.create_offer("coredns:dns-provider")
+    model_owner = untag("user-", ops_test.model.info.owner_tag)
+    logger.info("Consuming CMR offer")
+    saas = await client_model.consume(f"{model_owner}/{ops_test.model_name}.coredns")
+    logger.info("Relating to CMR offer")
+    relation = await coredns_test_app.add_relation(
+        "dns-provider", "coredns:dns-provider"
+    )
+    # Once the relation is added, then the test app will go to active status
+    await client_model.wait_for_idle(status="active", timeout=60)
+
+    yield coredns_test_app
+
+    # Clean up
+    if not ops_test.keep_client_model:
+        try:
+            if relation:
+                logger.info("Cleaning up client relation")
+                await coredns_test_app.remove_relation(
+                    "dns-provider", "coredns:dns-provider"
+                )
+                await client_model.wait_for_idle(raise_on_blocked=False, timeout=60)
+                await ops_test.model.wait_for_idle(timeout=60)
+            if saas:
+                logger.info("Removing CMR consumer")
+                await client_model.remove_saas("coredns")
+            if offer:
+                logger.info("Removing CMR offer")
+                await ops_test.model.remove_offer("coredns")
+        except Exception:
+            logger.exception("Error performing cleanup")

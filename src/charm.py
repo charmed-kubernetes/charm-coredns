@@ -35,15 +35,25 @@ class CoreDNSCharm(CharmBase):
         )
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
-            self.on.dns_provider_relation_changed,
-            self._on_dns_provider_relation_changed,
+            self.on.dns_provider_relation_created,
+            self._on_dns_provider_relation_created,
         )
         self.framework.observe(self.on.update_status, self._on_update_status)
+
+    @property
+    def is_running(self):
+        """Determine if a given service is running in a given container"""
+        try:
+            container = self.unit.get_container(self._COREDNS_CONTAINER)
+            service = container.get_service(self._COREDNS_CONTAINER)
+        except ModelError:
+            return False
+        return service.current == ServiceStatus.ACTIVE
 
     def _on_coredns_pebble_ready(self, event):
         """Define and start CoreDNS workload"""
         container = event.workload
-        if self._is_running(container, self._COREDNS_CONTAINER):
+        if self.is_running:
             logger.info("CoreDNS already started")
             return
 
@@ -56,17 +66,28 @@ class CoreDNSCharm(CharmBase):
     def _on_config_changed(self, event):
         """Process charm config changes and restart CoreDNS workload"""
         container = self.unit.get_container(self._COREDNS_CONTAINER)
-        if not self._is_running(container, self._COREDNS_CONTAINER):
+        if not self.is_running:
             logger.info("CoreDNS is not running")
             return
 
         self._push_corefile_config(event)
         container.stop(self._COREDNS_CONTAINER)
         container.start(self._COREDNS_CONTAINER)
+
+        # Update the domain data in the relation in case the domain changed
+        relation = self.model.get_relation("dns-provider")
+        if relation is not None:
+            provided_data = self.model.get_relation("dns-provider").data[self.unit]
+            provided_data.update(
+                {
+                    "domain": self.model.config["domain"],
+                }
+            )
+
         self._on_update_status(event)
 
-    def _on_dns_provider_relation_changed(self, event):
-        """Provide relation data on dns-provider relation"""
+    def _on_dns_provider_relation_created(self, event):
+        """Provide relation data on dns-provider relation created"""
         provided_data = event.relation.data[self.unit]
         ingress_address = provided_data.get("ingress-address")
         if not ingress_address:
@@ -84,8 +105,7 @@ class CoreDNSCharm(CharmBase):
 
     def _on_update_status(self, event):
         """Update Juju status"""
-        container = self.unit.get_container(self._COREDNS_CONTAINER)
-        if not self._is_running(container, self._COREDNS_CONTAINER):
+        if not self.is_running:
             self.unit.status = WaitingStatus("CoreDNS is not running")
         else:
             self.unit.status = ActiveStatus()
@@ -111,15 +131,6 @@ class CoreDNSCharm(CharmBase):
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
         container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
-
-    @staticmethod
-    def _is_running(container, service):
-        """Determine if a given service is running in a given container"""
-        try:
-            service = container.get_service(service)
-        except ModelError:
-            return False
-        return service.current == ServiceStatus.ACTIVE
 
 
 if __name__ == "__main__":

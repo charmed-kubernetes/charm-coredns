@@ -1,8 +1,10 @@
 from unittest.mock import call
 import logging
-
 from charm import CoreDNSCharm
 from ops.testing import Harness
+from string import Template
+
+logger = logging.getLogger(__name__)
 
 
 def test_not_leader():
@@ -38,11 +40,25 @@ def test_coredns_pebble_ready_already_started(harness, active_container, caplog)
     assert "CoreDNS already started" in caplog.text
 
 
-def test_config_changed(
-    harness, active_container, caplog, corefile_base, extra_server, corefile_extra
-):
-    harness.update_config({"forward": "1.1.1.1"})
-    harness.update_config({"extra_servers": extra_server})
+def test_config_changed(harness, active_container, caplog):
+
+    extra_servers = """. {
+log
+}
+"""
+    forward = "1.1.1.1"
+    domain = "some.domain"
+    corefile_template = Template(harness.model.config["corefile"])
+    corefile_base = corefile_template.safe_substitute(
+        {"domain": domain, "forward": forward, "extra_servers": ""}
+    )
+    corefile_extra = corefile_template.safe_substitute(
+        {"domain": domain, "forward": forward, "extra_servers": extra_servers}
+    )
+
+    harness.update_config({"domain": domain, "forward": forward})
+    harness.update_config({"extra_servers": extra_servers})
+
     active_container.push.assert_has_calls(
         [
             call("/etc/coredns/Corefile", corefile_base, make_dirs=True),
@@ -57,39 +73,53 @@ def test_config_changed_not_running(harness, inactive_container, caplog):
     assert "CoreDNS is not running" in caplog.text
 
 
-def test_dns_provider_relation_changed(harness, active_container):
-    relation_id = harness.add_relation("dns-provider", "kubernetes-master")
-    harness.add_relation_unit(relation_id, "kubernetes-master/0")
-    # Update the coredns side of the relation so ingres-address is present in the data
-    harness.update_relation_data(
-        relation_id, "coredns/0", {"ingress-address": "127.0.0.1"}
-    )
-    # Update the other side of the relation to trigger a relation changed event
-    harness.update_relation_data(relation_id, "kubernetes-master", {})
-    assert harness.get_relation_data(relation_id, "coredns/0") == {
+def test_dns_provider_relation_created(
+    relation_harness, relation_with_ingress, active_service, mocker
+):
+    container = relation_harness.model.unit.get_container("coredns")
+    container.get_service = mocker.MagicMock(return_value=active_service)
+    relation_harness.begin_with_initial_hooks()
+    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
         "domain": "cluster.local",
         "sdn-ip": "127.0.0.1",
         "port": "53",
         "ingress-address": "127.0.0.1",
     }
-    assert harness.model.unit.status.name == "active"
+    assert relation_harness.model.unit.status.name == "active"
 
 
-def test_dns_provider_relation_changed_no_ingress_address(harness, active_container):
-    relation_id = harness.add_relation("dns-provider", "kubernetes-master")
-    harness.add_relation_unit(relation_id, "kubernetes-master/0")
-    # Update the other side of the relation to trigger a relation changed event
-    # Note that the ingress address will not be present in the coredns-side's data
-    harness.update_relation_data(relation_id, "kubernetes-master", {})
+def test_dns_provider_relation_created_no_ingress_address(harness):
+    # The harness fixture does not have the ingress address
+    # in its relation data by default,
+    # so it will be missing
+    harness.add_relation("dns-provider", "kubernetes-master")
     assert harness.model.unit.status.name == "maintenance"
 
 
-def test_dns_provider_relation_changed_not_running(harness, inactive_container):
-    relation_id = harness.add_relation("dns-provider", "kubernetes-master")
-    harness.add_relation_unit(relation_id, "kubernetes-master/0")
-    harness.update_relation_data(
-        relation_id, "coredns/0", {"ingress-address": "127.0.0.1"}
-    )
-    # Update the other side of the relation to trigger a relation changed event
-    harness.update_relation_data(relation_id, "kubernetes-master", {})
-    assert harness.model.unit.status.name == "waiting"
+def test_dns_provider_relation_created_not_running(
+    relation_harness, relation_with_ingress, inactive_service, mocker
+):
+    container = relation_harness.model.unit.get_container("coredns")
+    container.get_service = mocker.MagicMock(return_value=inactive_service)
+    relation_harness.begin_with_initial_hooks()
+    assert relation_harness.model.unit.status.name == "waiting"
+
+
+def test_domain_changed(
+    relation_harness, relation_with_ingress, active_service, mocker
+):
+    container = relation_harness.model.unit.get_container("coredns")
+    container.get_service = mocker.MagicMock(return_value=active_service)
+    container.push = mocker.MagicMock()
+    relation_harness.begin_with_initial_hooks()
+    domain = "some.domain"
+    relation_harness.update_config({"domain": domain})
+
+    # Ensure the new domain name is present in the relation data after the
+    # config is updated
+    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
+        "domain": domain,
+        "sdn-ip": "127.0.0.1",
+        "port": "53",
+        "ingress-address": "127.0.0.1",
+    }
