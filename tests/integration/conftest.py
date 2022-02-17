@@ -95,11 +95,7 @@ async def related_app(ops_test, client_model, coredns_test_app):
     relation = await coredns_test_app.add_relation(
         "dns-provider", "coredns:dns-provider"
     )
-    # Once the relation is added, then the test app will go to active status
-    await client_model.wait_for_idle(status="active", timeout=60)
-
     yield coredns_test_app
-
     # Clean up
     if not ops_test.keep_client_model:
         try:

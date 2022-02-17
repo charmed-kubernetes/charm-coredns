@@ -6,18 +6,15 @@ from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus, ModelError
 from ops.pebble import ServiceStatus
+from ops.pebble import Error as PebbleError
 
 logger = logging.getLogger(__name__)
 
 
 class DnsProviderTestCharm(CharmBase):
     """Charm the service."""
-
-    _stored = StoredState()
-
     def __init__(self, *args):
         super().__init__(*args)
-        self._stored.set_default(coredns_relation_data={})
         self.is_related = False
         self.framework.observe(self.on.install, self._on_install)
         self.framework.observe(
@@ -27,9 +24,6 @@ class DnsProviderTestCharm(CharmBase):
             self.on.dns_provider_relation_changed,
             self._on_dns_provider_relation_changed,
         )
-        self.framework.observe(
-            self.on.get_relation_data_action, self._on_get_relation_data_action
-        )
 
     @property
     def is_running(self):
@@ -37,7 +31,7 @@ class DnsProviderTestCharm(CharmBase):
         try:
             container = self.unit.get_container("httpbin")
             service = container.get_service("httpbin")
-        except ModelError:
+        except (ModelError, PebbleError):
             return False
         return service.current == ServiceStatus.ACTIVE
 
@@ -66,29 +60,22 @@ class DnsProviderTestCharm(CharmBase):
         container.add_layer("httpbin", pebble_layer, combine=True)
         # Autostart any services that were defined with startup: enabled
         container.autostart()
-        self._update_status()
+        self._update_status(event)
 
     def _on_dns_provider_relation_changed(self, event):
-        provided_data = event.relation.data[event.unit]
-        domain = provided_data.get("domain")
-        sdn_ip = provided_data.get("sdn-ip")
-        port = provided_data.get("port")
-        self._stored.coredns_relation_data = {
-            "domain": domain,
-            "sdn-ip": sdn_ip,
-            "port": port,
-        }
-        self._update_status()
+        self._update_status(event)
 
-    def _on_get_relation_data_action(self, action):
-        if self._stored.coredns_relation_data == {}:
-            action.fail("CoreDNS relation data not available")
-            return
-        action.set_results(self._stored.coredns_relation_data)
-
-    def _update_status(self):
-        if self._stored.coredns_relation_data == {}:
+    def _update_status(self, event):
+        relation = self.model.get_relation("dns-provider")
+        if not relation:
             self.unit.status = WaitingStatus("Awaiting dns-provider relation data")
+            return
+        data = relation.data[event.app]
+        domain = data.get("domain")
+        sdn_ip = data.get("sdn-ip")
+        port = data.get("port")
+        if None in [domain, sdn_ip, port]:
+            self.unit.status = WaitingStatus("Relation is present but data is missing")
         elif not self.is_running:
             self.unit.status = WaitingStatus("DnsProviderTestCharm is not running")
         else:

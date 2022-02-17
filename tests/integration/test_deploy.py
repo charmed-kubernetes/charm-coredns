@@ -91,14 +91,10 @@ async def test_validate_dns(ops_test, validate_dns_pod, coredns_ip):
         ) == found, f"stdout: {stdout}\n stderr: {stderr}"
 
 
-async def test_cross_model_relation(ops_test, related_app):
-    for unit in related_app.units:
-        action = await unit.run_action("get-relation-data")
-        output = await action.wait()
-        assert output.status == "completed"
-        logger.info("Action Results: ")
-        logger.info(action.results)
-        assert action.results["domain"] == "cluster.local"
-        assert action.results["port"] == "53"
-        assert action.results["sdn-ip"] is not None
-        logger.info("Relation Data is OK")
+async def test_cross_model_relation(ops_test, related_app, client_model):
+    # After the app is related, it should reach active status if the
+    # relation data is present
+    logger.info("Waiting for active status ...")
+    await client_model.wait_for_idle(status="active", timeout=60)
+    assert client_model.applications["dns-provider-test"].units[0].workload_status == "active"
+

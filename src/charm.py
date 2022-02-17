@@ -8,6 +8,7 @@ from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus, ModelError
 from ops.pebble import ServiceStatus
 from lightkube.models.core_v1 import ServicePort
+from ops.pebble import Error as PebbleError
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class CoreDNSCharm(CharmBase):
         try:
             container = self.unit.get_container(self._COREDNS_CONTAINER)
             service = container.get_service(self._COREDNS_CONTAINER)
-        except ModelError:
+        except (ModelError, PebbleError):
             return False
         return service.current == ServiceStatus.ACTIVE
 
@@ -75,32 +76,34 @@ class CoreDNSCharm(CharmBase):
         container.start(self._COREDNS_CONTAINER)
 
         # Update the domain data in the relation in case the domain changed
-        relation = self.model.get_relation("dns-provider")
-        if relation is not None:
-            provided_data = self.model.get_relation("dns-provider").data[self.unit]
-            provided_data.update(
-                {
-                    "domain": self.model.config["domain"],
-                }
-            )
+        if self.unit.is_leader():
+            relation = self.model.get_relation("dns-provider")
+            if relation is not None:
+                provided_data = self.model.get_relation("dns-provider").data[self.app]
+                provided_data.update(
+                    {
+                        "domain": self.model.config["domain"],
+                    }
+                )
 
         self._on_update_status(event)
 
     def _on_dns_provider_relation_created(self, event):
         """Provide relation data on dns-provider relation created"""
-        provided_data = event.relation.data[self.unit]
-        ingress_address = provided_data.get("ingress-address")
-        if not ingress_address:
-            event.defer()
-            return
-
-        provided_data.update(
-            {
-                "domain": self.model.config["domain"],
-                "sdn-ip": str(ingress_address),
-                "port": "53",
-            }
-        )
+        if self.unit.is_leader():
+            ingress_address = event.relation.data[self.unit].get("ingress-address")
+            if not ingress_address:
+                logger.info("ingress-address is not present in relation data, deferring")
+                event.defer()
+                return
+            app_data = event.relation.data[self.app]
+            app_data.update(
+                {
+                    "domain": self.model.config["domain"],
+                    "sdn-ip": str(ingress_address),
+                    "port": "53",
+                }
+            )
         self._on_update_status(event)
 
     def _on_update_status(self, event):
