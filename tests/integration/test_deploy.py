@@ -7,7 +7,7 @@ import yaml
 from tenacity import retry, wait_exponential, stop_after_delay, before_log
 
 CHARM_DIR = Path(__file__).parent.parent.parent.resolve()
-SPEC_FILE = Path(__file__).parent / "data/validate-dns-spec.yaml"
+SPEC_FILE = Path(__file__).parent / "data" / "validate-dns-spec.yaml"
 META_FILE = Path(__file__).parent.parent.parent / "metadata.yaml"
 logger = logging.getLogger(__name__)
 
