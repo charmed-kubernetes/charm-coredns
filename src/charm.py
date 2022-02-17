@@ -79,7 +79,7 @@ class CoreDNSCharm(CharmBase):
         if self.unit.is_leader():
             relation = self.model.get_relation("dns-provider")
             if relation is not None:
-                provided_data = self.model.get_relation("dns-provider").data[self.app]
+                provided_data = self.model.get_relation("dns-provider").data[self.unit]
                 provided_data.update(
                     {
                         "domain": self.model.config["domain"],
@@ -98,8 +98,8 @@ class CoreDNSCharm(CharmBase):
                 )
                 event.defer()
                 return
-            app_data = event.relation.data[self.app]
-            app_data.update(
+            data = event.relation.data[self.unit]
+            data.update(
                 {
                     "domain": self.model.config["domain"],
                     "sdn-ip": str(ingress_address),

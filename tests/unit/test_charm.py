@@ -79,7 +79,8 @@ def test_dns_provider_relation_created(
     container = relation_harness.model.unit.get_container("coredns")
     container.get_service = mocker.MagicMock(return_value=active_service)
     relation_harness.begin_with_initial_hooks()
-    assert relation_harness.get_relation_data(relation_with_ingress, "coredns") == {
+    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
+        "ingress-address": "127.0.0.1",
         "domain": "cluster.local",
         "sdn-ip": "127.0.0.1",
         "port": "53",
@@ -116,7 +117,8 @@ def test_domain_changed(
 
     # Ensure the new domain name is present in the relation data after the
     # config is updated
-    assert relation_harness.get_relation_data(relation_with_ingress, "coredns") == {
+    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
+        "ingress-address": "127.0.0.1",
         "domain": domain,
         "sdn-ip": "127.0.0.1",
         "port": "53",

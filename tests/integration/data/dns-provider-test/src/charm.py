@@ -70,7 +70,7 @@ class DnsProviderTestCharm(CharmBase):
         if not relation:
             self.unit.status = WaitingStatus("Awaiting dns-provider relation data")
             return
-        data = relation.data[event.app]
+        data = relation.data[event.unit]
         domain = data.get("domain")
         sdn_ip = data.get("sdn-ip")
         port = data.get("port")
