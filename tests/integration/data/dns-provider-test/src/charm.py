@@ -2,7 +2,6 @@
 import logging
 
 from ops.charm import CharmBase
-from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus, ModelError
 from ops.pebble import ServiceStatus
@@ -13,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class DnsProviderTestCharm(CharmBase):
     """Charm the service."""
+
     def __init__(self, *args):
         super().__init__(*args)
         self.is_related = False

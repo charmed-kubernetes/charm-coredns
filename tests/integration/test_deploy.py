@@ -96,5 +96,5 @@ async def test_cross_model_relation(ops_test, related_app, client_model):
     # relation data is present
     logger.info("Waiting for active status ...")
     await client_model.wait_for_idle(status="active", timeout=60)
-    assert client_model.applications["dns-provider-test"].units[0].workload_status == "active"
-
+    unit = client_model.applications["dns-provider-test"].units[0]
+    assert unit.workload_status == "active"
