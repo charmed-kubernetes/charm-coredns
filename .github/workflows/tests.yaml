@@ -100,8 +100,8 @@ jobs:
     - name: Collect Kube logs
       if: failure()
       run: |
-        kubectl logs -n coredns -l app.kubernetes.io/name=coredns | tee tmp/coredns.log
-        kubectl logs -n coredns-client -l app.kubernetes.io/name=dns-provider-test | tee tmp/dns-provider-test.log
+        kubectl logs -n coredns -l app.kubernetes.io/name=coredns --container "charm coredns" | tee tmp/coredns.log
+        kubectl logs -n coredns-client -l app.kubernetes.io/name=dns-provider-test --container httpbin | tee tmp/dns-provider-test.log
 
     - name: Upload debug artifacts
       if: failure()
