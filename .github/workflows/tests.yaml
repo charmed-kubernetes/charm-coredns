@@ -60,10 +60,11 @@ jobs:
       run: |
         sg microk8s 'juju bootstrap microk8s microk8s'
         sg microk8s 'juju add-model coredns microk8s'
+        sg microk8s 'juju add-model coredns-client microk8s'
 
     - name: Run Integration tests
       run: |
-        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns
+        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns --client-model=coredns-client
       timeout-minutes: 20
 
     - name: Setup Debug Artifact Collection
@@ -99,7 +100,8 @@ jobs:
     - name: Collect Kube logs
       if: failure()
       run: |
-        kubectl logs -n coredns -l juju-app=coredns | tee tmp/coredns.log
+        kubectl logs -n coredns -l app.kubernetes.io/name=coredns --container "charm coredns" | tee tmp/coredns.log
+        kubectl logs -n coredns-client -l app.kubernetes.io/name=dns-provider-test --container httpbin | tee tmp/dns-provider-test.log
 
     - name: Upload debug artifacts
       if: failure()

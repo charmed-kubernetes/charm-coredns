@@ -5,11 +5,19 @@ verify_ssl = true
 
 [dev-packages]
 pytest = "*"
+pytest-mock = "*"
+pytest-cov = "*"
+pytest-operator = "*"
+lightkube = ">=0.10.0"
 flake8 = "*"
+black = "*"
 ipdb = "*"
+tenacity = "*"
 
 [packages]
-ops = "*"
+ops = ">=1.2.0"
+lightkube = "*"
+lightkube-models = "*"
 oci-image = {git = "https://github.com/juju-solutions/resource-oci-image/"}
 
 [requires]
