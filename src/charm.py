@@ -94,7 +94,7 @@ class CoreDNSCharm(CharmBase):
             ingress_address = event.relation.data[self.unit].get("ingress-address")
             if not ingress_address:
                 logger.info(
-                    "ingress-address is not present " "in relation data, deferring"
+                    "ingress-address is not present in relation data, deferring"
                 )
                 event.defer()
                 return
