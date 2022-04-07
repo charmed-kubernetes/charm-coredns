@@ -7,7 +7,7 @@ verify_ssl = true
 pytest = "*"
 pytest-mock = "*"
 pytest-cov = "*"
-pytest-operator = "*"
+pytest-operator = {git = "https://github.com/charmed-kubernetes/pytest-operator.git@multimodel"}
 lightkube = ">=0.10.0"
 flake8 = "*"
 black = "*"
