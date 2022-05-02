@@ -1,5 +1,6 @@
 name: coredns
 summary: CoreDNS
+docs: https://discourse.charmhub.io/t/coredns-docs-index/6322
 maintainers:
   - Cory Johns <cory.johns@canonical.com>
 description: |
