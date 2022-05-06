@@ -15,8 +15,8 @@ def mocked_service_patch(mocker):
 # Autouse to prevent calling out to the k8s API via lightkube
 @pytest.fixture(autouse=True)
 def mocked_lightkube_client(mocker):
-    with patch("lightkube.Client.apply") as mock_client_apply:
-        yield mock_client_apply
+    with patch("charm.Client") as mock_client:
+        yield mock_client
 
 
 @pytest.fixture()
