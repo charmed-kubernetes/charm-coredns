@@ -7,8 +7,10 @@ from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus, ModelError
 from ops.pebble import ServiceStatus
-from lightkube.models.core_v1 import ServicePort
 from ops.pebble import Error as PebbleError
+from pathlib import Path
+from lightkube.models.core_v1 import ServicePort
+from lightkube import Client, codecs
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ class CoreDNSCharm(CharmBase):
         layer = self._coredns_layer()
         container.add_layer(self._COREDNS_CONTAINER, layer)
         self._push_corefile_config(event)
+        self._apply_rbac_policy(event)
         container.autostart()
         self._on_update_status(event)
 
@@ -72,6 +75,7 @@ class CoreDNSCharm(CharmBase):
             return
 
         self._push_corefile_config(event)
+        self._apply_rbac_policy(event)
         container.stop(self._COREDNS_CONTAINER)
         container.start(self._COREDNS_CONTAINER)
 
@@ -136,6 +140,17 @@ class CoreDNSCharm(CharmBase):
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
         container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
+
+    def _apply_rbac_policy(self, _event):
+        if not self.unit.is_leader():
+            return
+        client = Client()
+        with Path("files", "rbac-policy.yaml").open() as f:
+            for policy in codecs.load_all_yaml(f):
+                if policy.kind == "ClusterRoleBinding":
+                    for subject in policy.subjects:
+                        subject.namespace = self.model.name
+                client.apply(policy)
 
 
 if __name__ == "__main__":
