@@ -42,4 +42,4 @@ subjects:
 - kind: ServiceAccount
   name: coredns
   namespace: kube-system
----
+

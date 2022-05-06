@@ -144,7 +144,7 @@ class CoreDNSCharm(CharmBase):
     def _apply_rbac_policy(self, _event):
         if not self.unit.is_leader():
             return
-        client = Client()
+        client = Client(field_manager="lightkube", namespace=self.model.name)
         with Path("files", "rbac-policy.yaml").open() as f:
             for policy in codecs.load_all_yaml(f):
                 if policy.kind == "ClusterRoleBinding":
