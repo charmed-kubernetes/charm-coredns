@@ -5,7 +5,7 @@ from string import Template
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, WaitingStatus, ModelError
+from ops.model import ActiveStatus, WaitingStatus, MaintenanceStatus, ModelError
 from ops.pebble import ServiceStatus
 from ops.pebble import Error as PebbleError
 from pathlib import Path
@@ -100,6 +100,7 @@ class CoreDNSCharm(CharmBase):
                 logger.info(
                     "ingress-address is not present in relation data, deferring"
                 )
+                self.unit.status = MaintenanceStatus("Waiting on ingress-address")
                 event.defer()
                 return
             data = event.relation.data[self.unit]
@@ -144,7 +145,7 @@ class CoreDNSCharm(CharmBase):
     def _apply_rbac_policy(self, _event):
         if not self.unit.is_leader():
             return
-        client = Client(field_manager="lightkube", namespace=self.model.name)
+        client = Client(field_manager=self.model.name, namespace=self.model.name)
         with Path("files", "rbac-policy.yaml").open() as f:
             for policy in codecs.load_all_yaml(f):
                 if policy.kind == "ClusterRoleBinding":
