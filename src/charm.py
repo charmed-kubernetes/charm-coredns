@@ -61,7 +61,7 @@ class CoreDNSCharm(CharmBase):
             return
 
         layer = self._coredns_layer()
-        container.add_layer(self._COREDNS_CONTAINER, layer)
+        container.add_layer(self._COREDNS_CONTAINER, layer, combine=True)
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
         container.autostart()
