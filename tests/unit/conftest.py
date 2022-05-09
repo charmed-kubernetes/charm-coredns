@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from charm import CoreDNSCharm
 from ops.testing import Harness
 from ops.pebble import ServiceStatus
@@ -9,6 +10,13 @@ from ops.pebble import ServiceStatus
 def mocked_service_patch(mocker):
     mocked_service_patch = mocker.patch("charm.KubernetesServicePatch")
     yield mocked_service_patch
+
+
+# Autouse to prevent calling out to the k8s API via lightkube
+@pytest.fixture(autouse=True)
+def mocked_lightkube_client(mocker):
+    with patch("charm.Client") as mock_client:
+        yield mock_client
 
 
 @pytest.fixture()
