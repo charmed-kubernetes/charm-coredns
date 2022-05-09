@@ -4,19 +4,29 @@ import logging
 from string import Template
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
+from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus, WaitingStatus, MaintenanceStatus, ModelError
+from ops.model import (
+    BlockedStatus,
+    ActiveStatus,
+    WaitingStatus,
+    MaintenanceStatus,
+    ModelError,
+)
 from ops.pebble import ServiceStatus
 from ops.pebble import Error as PebbleError
 from pathlib import Path
 from lightkube.models.core_v1 import ServicePort
-from lightkube import Client, codecs
+from lightkube import Client, codecs, ApiError
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class CoreDNSCharm(CharmBase):
     """CoreDNS Sidecar Charm"""
+
+    _stored = StoredState()
 
     _COREDNS_CONTAINER = "coredns"
 
@@ -42,6 +52,7 @@ class CoreDNSCharm(CharmBase):
             self._on_dns_provider_relation_created,
         )
         self.framework.observe(self.on.update_status, self._on_update_status)
+        self._stored.set_default(forbidden=False)
 
     @property
     def is_running(self):
@@ -117,6 +128,8 @@ class CoreDNSCharm(CharmBase):
         """Update Juju status"""
         if not self.is_running:
             self.unit.status = WaitingStatus("CoreDNS is not running")
+        elif self._stored.forbidden:
+            self.unit.status = BlockedStatus("Forbidden to apply RBAC Policies.")
         else:
             self.unit.status = ActiveStatus()
 
@@ -142,16 +155,22 @@ class CoreDNSCharm(CharmBase):
         corefile = corefile.safe_substitute(self.model.config)
         container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
 
-    def _apply_rbac_policy(self, _event):
+    def _apply_rbac_policy(self, _event) -> Optional[str]:
         if not self.unit.is_leader():
             return
         client = Client(field_manager=self.model.name, namespace=self.model.name)
+        self._stored.forbidden = False
         with Path("files", "rbac-policy.yaml").open() as f:
             for policy in codecs.load_all_yaml(f):
                 if policy.kind == "ClusterRoleBinding":
                     for subject in policy.subjects:
                         subject.namespace = self.model.name
-                client.apply(policy)
+                try:
+                    client.apply(policy)
+                except ApiError as err:
+                    self._stored.forbidden |= err.status.code == 403
+                    if not self._stored.forbidden:
+                        raise
 
 
 if __name__ == "__main__":
