@@ -25,6 +25,7 @@ async def test_build_and_deploy(ops_test):
         resources={"coredns-image": upstream_image},
         config=dict(forward="8.8.8.8"),
         application_name=app_name,
+        trust=True,
     )
     logger.info("Deploying CoreDNS charm ...")
     await ops_test.model.wait_for_idle(apps=[app_name], status="active")
