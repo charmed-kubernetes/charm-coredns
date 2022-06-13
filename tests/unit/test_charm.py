@@ -2,6 +2,7 @@ from unittest.mock import call
 import logging
 from charm import CoreDNSCharm
 from ops.testing import Harness
+from ops.model import ActiveStatus
 from string import Template
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 def test_not_leader():
     harness = Harness(CoreDNSCharm)
     harness.begin()
-    assert harness.charm.model.unit.status.name == "waiting"
+    assert isinstance(harness.charm.model.unit.status, ActiveStatus)
 
 
 def test_coredns_pebble_ready(harness, container):
