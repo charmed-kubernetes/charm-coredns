@@ -35,7 +35,7 @@ class CoreDNSCharm(CharmBase):
 
         if not self.unit.is_leader():
             # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = WaitingStatus("Waiting for leadership")
+            self.model.unit.status = ActiveStatus()
             return
 
         dns_udp = ServicePort(53, protocol="UDP", name="dns")
