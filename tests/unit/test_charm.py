@@ -1,14 +1,13 @@
 from unittest.mock import call
 import logging
 import ops.testing
-from charm import CoreDNSCharm
 from string import Template
 
 logger = logging.getLogger(__name__)
 ops.testing.SIMULATE_CAN_CONNECT = True
 
 
-def test_coredns_pebble_ready(harness, container):
+def test_coredns_pebble_ready(harness, container, mocked_lightkube_client):
     expected_plan = {
         "services": {
             "coredns": {
@@ -25,6 +24,16 @@ def test_coredns_pebble_ready(harness, container):
     service = harness.model.unit.get_container("coredns").get_service("coredns")
     assert service.is_running()
     assert harness.model.unit.status.name == "active"
+
+    # testing that the dnsPolicy is patched via lightkube
+    assert mocked_lightkube_client.return_value.patch.call_count == 1
+    for patch in mocked_lightkube_client.return_value.patch.call_args_list:
+        assert patch.args[0].__name__ == "StatefulSet"
+        assert patch.kwargs["name"] == "coredns"
+        assert patch.kwargs["namespace"] == "coredns-model"
+        assert patch.kwargs["obj"] == {
+            "spec": {"template": {"spec": {"dnsPolicy": "Default"}}}
+        }
 
 
 def test_coredns_pebble_ready_already_started(harness, active_container, caplog):
@@ -116,16 +125,3 @@ def test_domain_changed(
         "sdn-ip": "127.0.0.1",
         "port": "53",
     }
-
-
-def test_install(harness, mocked_lightkube_client):
-    mocked_lightkube_client.reset_mock()
-    harness.charm.on.install.emit()
-    harness.charm.on.upgrade_charm.emit()
-    # Called once for install, once for upgrade_charm
-    assert mocked_lightkube_client.return_value.patch.call_count == 2
-    for patch in mocked_lightkube_client.return_value.patch.call_args_list:
-        assert patch.args[0].__name__ == "StatefulSet"
-        assert patch.kwargs['name'] == "coredns"
-        assert patch.kwargs['namespace'] == "coredns-model"
-        assert patch.kwargs['obj'] == {'spec': {'template': {'spec': {'dnsPolicy': 'Default'}}}}

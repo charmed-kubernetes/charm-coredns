@@ -28,6 +28,7 @@ def pytest_addoption(parser):
 async def app_name():
     return "coredns"
 
+
 @pytest_asyncio.fixture
 async def client_model(ops_test, request):
     # TODO: fold this into pytest-operator
@@ -112,9 +113,9 @@ async def related_app(ops_test, client_model, coredns_test_app, app_name):
                 await ops_test.model.wait_for_idle(timeout=60)
             if saas:
                 logger.info("Removing CMR consumer")
-                await client_model.remove_saas(f"{app_name}")
+                await client_model.remove_saas(app_name)
             if offer:
                 logger.info("Removing CMR offer")
-                await ops_test.model.remove_offer(f"{app_name}")
+                await ops_test.model.remove_offer(app_name)
         except Exception:
             logger.exception("Error performing cleanup")

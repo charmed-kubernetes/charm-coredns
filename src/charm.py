@@ -24,15 +24,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
 def _get_metadata():
     root_path = Path(__file__).parent.parent
-    metadata_path = root_path / 'metadata.yaml'
+    metadata_path = root_path / "metadata.yaml"
     with metadata_path.open() as f:
         return CharmMeta.from_yaml(f)
 
 
 class CoreDNSCharm(CharmBase):
     """CoreDNS Sidecar Charm"""
+
     _stored = StoredState()
 
     _CHARM_NAME = _get_metadata().name
@@ -46,8 +48,6 @@ class CoreDNSCharm(CharmBase):
         metrics = ServicePort(9153, protocol="TCP", name="metrics")
         self.service_patcher = KubernetesServicePatch(self, [dns_udp, dns_tcp, metrics])
 
-        self.framework.observe(self.on.install, self._on_install_or_upgrade)
-        self.framework.observe(self.on.upgrade_charm, self._on_install_or_upgrade)
         self.framework.observe(
             self.on.coredns_pebble_ready, self._on_coredns_pebble_ready
         )
@@ -69,10 +69,6 @@ class CoreDNSCharm(CharmBase):
             return False
         return service.current == ServiceStatus.ACTIVE
 
-    def _on_install_or_upgrade(self, event):
-        """Perform one-time setup steps"""
-        self._patch_statefulset()
-
     def _on_coredns_pebble_ready(self, event):
         """Define and start CoreDNS workload"""
         container = event.workload
@@ -84,6 +80,7 @@ class CoreDNSCharm(CharmBase):
         container.add_layer(self._CHARM_NAME, layer, combine=True)
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
+        self._patch_statefulset()
         container.autostart()
         self._on_update_status(event)
 
@@ -188,8 +185,9 @@ class CoreDNSCharm(CharmBase):
         logger.info(f"Patching Default dnsPolicy for {self._CHARM_NAME} statefulset")
         client = Client(field_manager=self.model.name, namespace=self.model.name)
         patch = {"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
-        client.patch(StatefulSet, name=self._CHARM_NAME, namespace=self.model.name,
-                     obj=patch)
+        client.patch(
+            StatefulSet, name=self._CHARM_NAME, namespace=self.model.name, obj=patch
+        )
 
 
 if __name__ == "__main__":

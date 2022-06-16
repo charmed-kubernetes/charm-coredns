@@ -12,6 +12,7 @@ META_FILE = Path(__file__).parent.parent.parent / "metadata.yaml"
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.skip_if_deployed
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test, app_name):
     coredns = await ops_test.build_charm(CHARM_DIR)
@@ -22,6 +23,7 @@ async def test_build_and_deploy(ops_test, app_name):
     await ops_test.model.deploy(
         coredns,
         resources={"coredns-image": upstream_image},
+        config=dict(forward="8.8.8.8"),
         application_name=app_name,
         trust=True,
     )
@@ -79,16 +81,25 @@ def validate_dns_pod(ops_test):
 
 async def test_validate_dns_policy(ops_test, app_name):
     rc, stdout, stderr = await ops_test.run(
-        "kubectl", "get", "statefulset", app_name, "-n", ops_test.model_name, "-o", "yaml", "|",
-        "grep", "dnsPolicy"
+        "kubectl",
+        "get",
+        "statefulset",
+        app_name,
+        "-n",
+        ops_test.model_name,
+        "-o",
+        "yaml",
+        "|",
+        "grep",
+        "dnsPolicy",
     )
-    assert ("dnsPolicy: Default" in stdout)
+    assert "dnsPolicy: Default" in stdout
 
 
 async def test_validate_dns(ops_test, validate_dns_pod, coredns_ip):
     for name, found in (
         ("www.ubuntu.com", True),  # Should find an answer
-        ("kubernetes.default.svc.cluster.local", True),  # Should find an answer
+        ("kubernetes.default.svc.cluster.local", False),  # Shouldn't find an answer
     ):
         rc, stdout, stderr = await ops_test.run(
             "kubectl", "exec", "validate-dns", "--", "nslookup", name, coredns_ip
