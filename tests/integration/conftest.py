@@ -25,6 +25,10 @@ def pytest_addoption(parser):
 
 
 @pytest_asyncio.fixture
+async def app_name():
+    return "coredns"
+
+@pytest_asyncio.fixture
 async def client_model(ops_test, request):
     # TODO: fold this into pytest-operator
     model_name = request.config.option.client_model
@@ -84,16 +88,16 @@ async def coredns_test_app(ops_test, client_model):
 
 
 @pytest_asyncio.fixture
-async def related_app(ops_test, client_model, coredns_test_app):
+async def related_app(ops_test, client_model, coredns_test_app, app_name):
     offer, saas, relation = None, None, None
     logger.info("Creating CMR offer")
-    offer = await ops_test.model.create_offer("coredns:dns-provider")
+    offer = await ops_test.model.create_offer(f"{app_name}:dns-provider")
     model_owner = untag("user-", ops_test.model.info.owner_tag)
     logger.info("Consuming CMR offer")
-    saas = await client_model.consume(f"{model_owner}/{ops_test.model_name}.coredns")
+    saas = await client_model.consume(f"{model_owner}/{ops_test.model_name}.{app_name}")
     logger.info("Relating to CMR offer")
     relation = await coredns_test_app.add_relation(
-        "dns-provider", "coredns:dns-provider"
+        "dns-provider", f"{app_name}:dns-provider"
     )
     yield coredns_test_app
     # Clean up
@@ -102,15 +106,15 @@ async def related_app(ops_test, client_model, coredns_test_app):
             if relation:
                 logger.info("Cleaning up client relation")
                 await coredns_test_app.remove_relation(
-                    "dns-provider", "coredns:dns-provider"
+                    "dns-provider", f"{app_name}:dns-provider"
                 )
                 await client_model.wait_for_idle(raise_on_blocked=False, timeout=60)
                 await ops_test.model.wait_for_idle(timeout=60)
             if saas:
                 logger.info("Removing CMR consumer")
-                await client_model.remove_saas("coredns")
+                await client_model.remove_saas(f"{app_name}")
             if offer:
                 logger.info("Removing CMR offer")
-                await ops_test.model.remove_offer("coredns")
+                await ops_test.model.remove_offer(f"{app_name}")
         except Exception:
             logger.exception("Error performing cleanup")

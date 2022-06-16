@@ -1,22 +1,14 @@
 from unittest.mock import call
 import logging
+import ops.testing
 from charm import CoreDNSCharm
-from ops.testing import Harness
-from ops.model import ActiveStatus
 from string import Template
 
 logger = logging.getLogger(__name__)
-
-
-def test_not_leader():
-    harness = Harness(CoreDNSCharm)
-    harness.begin()
-    assert isinstance(harness.charm.model.unit.status, ActiveStatus)
+ops.testing.SIMULATE_CAN_CONNECT = True
 
 
 def test_coredns_pebble_ready(harness, container):
-    initial_plan = harness.get_container_pebble_plan("coredns")
-    assert initial_plan.to_yaml() == "{}\n"
     expected_plan = {
         "services": {
             "coredns": {
@@ -27,9 +19,9 @@ def test_coredns_pebble_ready(harness, container):
             }
         },
     }
-    harness.charm.on.coredns_pebble_ready.emit(container)
-    updated_plan = harness.get_container_pebble_plan("coredns").to_dict()
-    assert expected_plan == updated_plan
+    # harness.container_pebble_ready('coredns')
+    actual_plan = harness.get_container_pebble_plan("coredns").to_dict()
+    assert expected_plan == actual_plan
     service = harness.model.unit.get_container("coredns").get_service("coredns")
     assert service.is_running()
     assert harness.model.unit.status.name == "active"
@@ -124,3 +116,16 @@ def test_domain_changed(
         "sdn-ip": "127.0.0.1",
         "port": "53",
     }
+
+
+def test_install(harness, mocked_lightkube_client):
+    mocked_lightkube_client.reset_mock()
+    harness.charm.on.install.emit()
+    harness.charm.on.upgrade_charm.emit()
+    # Called once for install, once for upgrade_charm
+    assert mocked_lightkube_client.return_value.patch.call_count == 2
+    for patch in mocked_lightkube_client.return_value.patch.call_args_list:
+        assert patch.args[0].__name__ == "StatefulSet"
+        assert patch.kwargs['name'] == "coredns"
+        assert patch.kwargs['namespace'] == "coredns-model"
+        assert patch.kwargs['obj'] == {'spec': {'template': {'spec': {'dnsPolicy': 'Default'}}}}

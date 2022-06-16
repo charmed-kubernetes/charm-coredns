@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test):
-    app_name = "coredns"
+async def test_build_and_deploy(ops_test, app_name):
     coredns = await ops_test.build_charm(CHARM_DIR)
     logger.info(f"CoreDNS charm built @ {coredns}")
     metadata = yaml.safe_load(META_FILE.read_text())
@@ -23,7 +22,6 @@ async def test_build_and_deploy(ops_test):
     await ops_test.model.deploy(
         coredns,
         resources={"coredns-image": upstream_image},
-        config=dict(forward="8.8.8.8"),
         application_name=app_name,
         trust=True,
     )
@@ -47,7 +45,7 @@ async def test_build_and_deploy(ops_test):
     def wait_for_ready():
         client = Client()
         pods = client.list(
-            Pod, namespace=model_name, labels={"app.kubernetes.io/name": "coredns"}
+            Pod, namespace=model_name, labels={"app.kubernetes.io/name": app_name}
         )
         assert all(
             c.ready for p in pods for c in p.status.containerStatuses
@@ -58,9 +56,9 @@ async def test_build_and_deploy(ops_test):
 
 
 @pytest.fixture()
-def coredns_ip(ops_test):
+def coredns_ip(ops_test, app_name):
     client = Client()
-    coredns_service = client.get(Service, "coredns", namespace=ops_test.model_name)
+    coredns_service = client.get(Service, app_name, namespace=ops_test.model_name)
     yield coredns_service.spec.clusterIP
 
 
@@ -79,11 +77,19 @@ def validate_dns_pod(ops_test):
         client.delete(type(obj), obj.metadata.name)
 
 
+async def test_validate_dns_policy(ops_test, app_name):
+    rc, stdout, stderr = await ops_test.run(
+        "kubectl", "get", "statefulset", app_name, "-n", ops_test.model_name, "-o", "yaml", "|",
+        "grep", "dnsPolicy"
+    )
+    assert ("dnsPolicy: Default" in stdout)
+
+
 async def test_validate_dns(ops_test, validate_dns_pod, coredns_ip):
     for name, found in (
         ("www.ubuntu.com", True),  # Should find an answer
-        ("kubernetes.default.svc.cluster.local", False),
-    ):  # Shouldn't find answer
+        ("kubernetes.default.svc.cluster.local", True),  # Should find an answer
+    ):
         rc, stdout, stderr = await ops_test.run(
             "kubectl", "exec", "validate-dns", "--", "nslookup", name, coredns_ip
         )

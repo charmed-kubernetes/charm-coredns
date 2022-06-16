@@ -4,6 +4,7 @@ import logging
 from string import Template
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
+from ops.charm import CharmMeta
 from ops.framework import StoredState
 from ops.main import main
 from ops.model import (
@@ -17,32 +18,36 @@ from ops.pebble import ServiceStatus
 from ops.pebble import Error as PebbleError
 from pathlib import Path
 from lightkube.models.core_v1 import ServicePort
+from lightkube.resources.apps_v1 import StatefulSet
 from lightkube import Client, codecs, ApiError
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+def _get_metadata():
+    root_path = Path(__file__).parent.parent
+    metadata_path = root_path / 'metadata.yaml'
+    with metadata_path.open() as f:
+        return CharmMeta.from_yaml(f)
+
 
 class CoreDNSCharm(CharmBase):
     """CoreDNS Sidecar Charm"""
-
     _stored = StoredState()
 
-    _COREDNS_CONTAINER = "coredns"
+    _CHARM_NAME = _get_metadata().name
 
     def __init__(self, *args):
         super().__init__(*args)
 
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = ActiveStatus()
-            return
-
+        self.client = Client(field_manager=self.model.name, namespace=self.model.name)
         dns_udp = ServicePort(53, protocol="UDP", name="dns")
         dns_tcp = ServicePort(53, protocol="TCP", name="dns-tcp")
         metrics = ServicePort(9153, protocol="TCP", name="metrics")
         self.service_patcher = KubernetesServicePatch(self, [dns_udp, dns_tcp, metrics])
 
+        self.framework.observe(self.on.install, self._on_install_or_upgrade)
+        self.framework.observe(self.on.upgrade_charm, self._on_install_or_upgrade)
         self.framework.observe(
             self.on.coredns_pebble_ready, self._on_coredns_pebble_ready
         )
@@ -58,11 +63,15 @@ class CoreDNSCharm(CharmBase):
     def is_running(self):
         """Determine if a given service is running in a given container"""
         try:
-            container = self.unit.get_container(self._COREDNS_CONTAINER)
-            service = container.get_service(self._COREDNS_CONTAINER)
+            container = self.unit.get_container(self._CHARM_NAME)
+            service = container.get_service(self._CHARM_NAME)
         except (ModelError, PebbleError):
             return False
         return service.current == ServiceStatus.ACTIVE
+
+    def _on_install_or_upgrade(self, event):
+        """Perform one-time setup steps"""
+        self._patch_statefulset()
 
     def _on_coredns_pebble_ready(self, event):
         """Define and start CoreDNS workload"""
@@ -72,7 +81,7 @@ class CoreDNSCharm(CharmBase):
             return
 
         layer = self._coredns_layer()
-        container.add_layer(self._COREDNS_CONTAINER, layer, combine=True)
+        container.add_layer(self._CHARM_NAME, layer, combine=True)
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
         container.autostart()
@@ -80,15 +89,15 @@ class CoreDNSCharm(CharmBase):
 
     def _on_config_changed(self, event):
         """Process charm config changes and restart CoreDNS workload"""
-        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        container = self.unit.get_container(self._CHARM_NAME)
         if not self.is_running:
             logger.info("CoreDNS is not running")
             return
 
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
-        container.stop(self._COREDNS_CONTAINER)
-        container.start(self._COREDNS_CONTAINER)
+        container.stop(self._CHARM_NAME)
+        container.start(self._CHARM_NAME)
 
         # Update the domain data in the relation in case the domain changed
         if self.unit.is_leader():
@@ -139,7 +148,7 @@ class CoreDNSCharm(CharmBase):
             "summary": "CoreDNS layer",
             "description": "pebble config layer for CoreDNS",
             "services": {
-                self._COREDNS_CONTAINER: {
+                self._CHARM_NAME: {
                     "override": "replace",
                     "summary": "CoreDNS",
                     "command": "/coredns -conf /etc/coredns/Corefile",
@@ -150,7 +159,7 @@ class CoreDNSCharm(CharmBase):
 
     def _push_corefile_config(self, event):
         """Push corefile config to CoreDNS container"""
-        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        container = self.unit.get_container(self._CHARM_NAME)
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
         container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
@@ -158,6 +167,7 @@ class CoreDNSCharm(CharmBase):
     def _apply_rbac_policy(self, _event) -> Optional[str]:
         if not self.unit.is_leader():
             return
+        logger.info("Applying RBAC policies")
         client = Client(field_manager=self.model.name, namespace=self.model.name)
         self._stored.forbidden = False
         with Path("files", "rbac-policy.yaml").open() as f:
@@ -171,6 +181,15 @@ class CoreDNSCharm(CharmBase):
                     self._stored.forbidden |= err.status.code == 403
                     if not self._stored.forbidden:
                         raise
+
+    def _patch_statefulset(self):
+        if not self.unit.is_leader():
+            return
+        logger.info(f"Patching Default dnsPolicy for {self._CHARM_NAME} statefulset")
+        client = Client(field_manager=self.model.name, namespace=self.model.name)
+        patch = {"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
+        client.patch(StatefulSet, name=self._CHARM_NAME, namespace=self.model.name,
+                     obj=patch)
 
 
 if __name__ == "__main__":
