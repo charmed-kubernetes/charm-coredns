@@ -173,7 +173,7 @@ class CoreDNSCharm(CharmBase):
                     for subject in policy.subjects:
                         subject.namespace = self.model.name
                 try:
-                    client.apply(policy)
+                    client.apply(policy, force=True)
                 except ApiError as err:
                     self._stored.forbidden |= err.status.code == 403
                     if not self._stored.forbidden:
