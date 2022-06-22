@@ -1,4 +1,3 @@
-import base64
 import logging
 from pathlib import Path
 import pytest
@@ -25,27 +24,48 @@ async def test_build_and_deploy_autoscaler_charm(ops_test, coredns_model):
             resources={"coredns-image": image},
         )
 
-        await m.block_until(
-            lambda: "coredns" in m.applications, timeout=60
-        )
+        await m.block_until(lambda: "coredns" in m.applications, timeout=60)
 
         await m.wait_for_idle(status="active")
 
 
-async def test_internal_resolution(ops_test, related, k8s_client, validate_dns_pod, coredns_ip):
+async def test_internal_resolution(
+    ops_test, related, k8s_client, validate_dns_pod, coredns_ip
+):
     _, namespace = k8s_client
     log.info("Testing internal resolution ...")
     rc, stdout, stderr = await ops_test.run(
-        "kubectl", "exec", "validate-dns", "-n", namespace, "--", "nslookup", "kubernetes.default.svc.cluster.local")
-    assert (f"Server:\t\t{coredns_ip}" in stdout), f"stdout: {stdout}\n stderr: {stderr}"
-    assert ("kubernetes.default.svc.cluster.local" in stdout), f"stdout: {stdout}\n stderr: {stderr}"
+        "kubectl",
+        "exec",
+        "validate-dns",
+        "-n",
+        namespace,
+        "--",
+        "nslookup",
+        "kubernetes.default.svc.cluster.local",
+    )
+    assert f"Server:\t\t{coredns_ip}" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
+    assert (
+        "kubernetes.default.svc.cluster.local" in stdout
+    ), f"stdout: {stdout}\n stderr: {stderr}"
     assert rc == 0
 
-async def test_external_resolution(ops_test, related, k8s_client, validate_dns_pod, coredns_ip):
+
+async def test_external_resolution(
+    ops_test, related, k8s_client, validate_dns_pod, coredns_ip
+):
     _, namespace = k8s_client
     log.info("Testing external resolution ...")
     rc, stdout, stderr = await ops_test.run(
-        "kubectl", "exec", "validate-dns", "-n", namespace, "--", "nslookup", "www.ubuntu.com")
-    assert (f"Server:\t\t{coredns_ip}" in stdout), f"stdout: {stdout}\n stderr: {stderr}"
-    assert ("Non-authoritative answer" in stdout), f"stdout: {stdout}\n stderr: {stderr}"
+        "kubectl",
+        "exec",
+        "validate-dns",
+        "-n",
+        namespace,
+        "--",
+        "nslookup",
+        "www.ubuntu.com",
+    )
+    assert f"Server:\t\t{coredns_ip}" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
+    assert "Non-authoritative answer" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
     assert rc == 0

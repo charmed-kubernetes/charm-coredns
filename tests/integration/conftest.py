@@ -24,7 +24,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--k8s-cloud",
         action="store",
-        help="Juju kubernetes cloud to reuse; if not provided, will generate a new cloud",
+        help="Juju kubernetes cloud to reuse; if not provided, will create a new cloud",
     )
 
 
@@ -40,7 +40,9 @@ async def charmed_kubernetes(ops_test):
                 if "kubernetes-control-plane" in app.charm_url
             ]
             if not control_plane_apps:
-                pytest.fail(f"Model {current_model} doesn't contain {control_plane_app} charm")
+                pytest.fail(
+                    f"Model {current_model} doesn't contain {control_plane_app} charm"
+                )
             deploy, control_plane_app = False, control_plane_apps[0]
 
         if deploy:
@@ -70,7 +72,8 @@ def module_name(request):
 
 @pytest_asyncio.fixture(scope="module")
 async def k8s_cloud(charmed_kubernetes, ops_test, request, module_name):
-    """Use an existing k8s-cloud or create a k8s-cloud for deploying a new k8s model into"""
+    """Use an existing k8s-cloud or create a k8s-cloud
+    for deploying a new k8s model into"""
     cloud_name = request.config.option.k8s_cloud or f"{module_name}-k8s-cloud"
     controller = await ops_test.model.get_controller()
     current_clouds = await controller.clouds()
@@ -150,16 +153,18 @@ async def related(ops_test, coredns_model):
     machine_model_name = ops_test.model_name
     model_owner = untag("user-", coredns_model_obj.info.owner_tag)
     with ops_test.model_context(k8s_alias) as m:
-        offer, saas, relation = None, None, None
+        offer, saas = None, None
         log.info("Creating CMR offer")
         offer = await m.create_offer(f"{app_name}:dns-provider")
         coredns_model_name = ops_test.model_name
 
     log.info("Consuming CMR offer")
     log.info(f"{machine_model_name} consuming CMR offer from {coredns_model_name}")
-    saas = await ops_test.model.consume(f"{model_owner}/{coredns_model_name}.{app_name}")
+    saas = await ops_test.model.consume(
+        f"{model_owner}/{coredns_model_name}.{app_name}"
+    )
     log.info("Relating ...")
-    relation = await ops_test.model.add_relation(
+    await ops_test.model.add_relation(
         "kubernetes-control-plane", f"{app_name}:dns-provider"
     )
     with ops_test.model_context(k8s_alias) as coredns_model:
@@ -175,7 +180,9 @@ async def related(ops_test, coredns_model):
                 await ops_test.model.remove_saas(app_name)
             if offer:
                 log.info("Removing CMR offer and relations")
-                await coredns_model_obj.remove_offer(f"{coredns_model_name}.{app_name}", force=True)
+                await coredns_model_obj.remove_offer(
+                    f"{coredns_model_name}.{app_name}", force=True
+                )
         except Exception:
             log.exception("Error performing cleanup")
 
@@ -201,8 +208,6 @@ def validate_dns_pod(ops_test, k8s_client):
 def coredns_ip(ops_test, coredns_model, k8s_client):
     coredns_model_obj, k8s_alias = coredns_model
     client, _ = k8s_client
-    with ops_test.model_context(k8s_alias) as m:
+    with ops_test.model_context(k8s_alias):
         coredns_service = client.get(Service, "coredns", namespace=ops_test.model_name)
     yield coredns_service.spec.clusterIP
-
-
