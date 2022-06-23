@@ -25,13 +25,6 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _get_metadata():
-    root_path = Path(__file__).parent.parent
-    metadata_path = root_path / "metadata.yaml"
-    with metadata_path.open() as f:
-        return CharmMeta.from_yaml(f)
-
-
 class CoreDNSCharm(CharmBase):
     """CoreDNS Sidecar Charm"""
     _stored = StoredState()
