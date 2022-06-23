@@ -121,12 +121,14 @@ async def k8s_client(charmed_kubernetes, request, module_name):
     log.info(f"Creating namespace {namespace} for use with lightkube client")
     client.create(namespace_obj)
     yield client, namespace
+    log.info(f"Deleting namespace {namespace} for use with lightkube client")
     client.delete(Namespace, namespace)
 
 
 @pytest_asyncio.fixture(scope="module")
 async def coredns_model(k8s_cloud, ops_test):
     model_alias = "coredns-model"
+    log.info("Creating CoreDNS model ...")
     model = await ops_test.track_model(
         model_alias, cloud_name=k8s_cloud, credential_name=k8s_cloud
     )
@@ -143,7 +145,9 @@ async def coredns_model(k8s_cloud, ops_test):
         which = [m for m in model_list if m["model-uuid"] == model_uuid]
         return len(which) == 0
 
+    log.info("Removing CoreDNS model")
     await juju.utils.block_until_with_coroutine(model_removed, timeout=timeout)
+    log.info("CoreDNS model removed")
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -193,6 +197,7 @@ def validate_dns_pod(ops_test, k8s_client):
     log.info("Creating pod for dns validation ...")
     spec_file = Path(__file__).parent / "data" / "validate-dns-spec.yaml"
     spec = codecs.load_all_yaml(spec_file.read_text())
+    log.info("Creating DNS validation pod ...")
     for obj in spec:
         client.create(obj)
 
@@ -200,6 +205,7 @@ def validate_dns_pod(ops_test, k8s_client):
         Pod, "validate-dns", namespace=namespace, for_conditions=("ContainersReady",)
     )
     yield
+    log.info("Removing DNS validation pod ...")
     for obj in spec:
         client.delete(type(obj), obj.metadata.name)
 
