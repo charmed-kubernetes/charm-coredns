@@ -31,7 +31,7 @@ def test_coredns_pebble_ready(harness, container, mocked_lightkube_client):
         StatefulSet,
         name="coredns",
         namespace="coredns-model",
-        obj={"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
+        obj={"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}},
     )
 
 

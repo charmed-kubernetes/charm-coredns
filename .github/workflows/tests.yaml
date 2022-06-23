@@ -23,6 +23,8 @@ jobs:
     name: VSphere Integration Test
     runs-on: self-hosted
     timeout-minutes: 90
+    needs:
+      - lint-and-unit-tests
     steps:
       - name: Check out code
         uses: actions/checkout@v2

@@ -4,7 +4,6 @@ import logging
 from string import Template
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from ops.charm import CharmBase
-from ops.charm import CharmMeta
 from ops.framework import StoredState
 from ops.main import main
 from ops.model import (
@@ -27,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class CoreDNSCharm(CharmBase):
     """CoreDNS Sidecar Charm"""
+
     _stored = StoredState()
 
     def __init__(self, *args):
