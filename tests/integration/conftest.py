@@ -147,6 +147,8 @@ async def coredns_model(k8s_cloud, ops_test):
 
     log.info("Removing CoreDNS model")
     await juju.utils.block_until_with_coroutine(model_removed, timeout=timeout)
+    # Update client's model cache
+    await ops_test.juju("models")
     log.info("CoreDNS model removed")
 
 
