@@ -17,6 +17,7 @@ from ops.pebble import ServiceStatus
 from ops.pebble import Error as PebbleError
 from pathlib import Path
 from lightkube.models.core_v1 import ServicePort
+from lightkube.resources.apps_v1 import StatefulSet
 from lightkube import Client, codecs, ApiError
 from typing import Optional
 
@@ -28,16 +29,10 @@ class CoreDNSCharm(CharmBase):
 
     _stored = StoredState()
 
-    _COREDNS_CONTAINER = "coredns"
-
     def __init__(self, *args):
         super().__init__(*args)
 
-        if not self.unit.is_leader():
-            # We can't do anything useful when not the leader, so do nothing.
-            self.model.unit.status = ActiveStatus()
-            return
-
+        self.client = Client(field_manager=self.app.name, namespace=self.model.name)
         dns_udp = ServicePort(53, protocol="UDP", name="dns")
         dns_tcp = ServicePort(53, protocol="TCP", name="dns-tcp")
         metrics = ServicePort(9153, protocol="TCP", name="metrics")
@@ -58,8 +53,8 @@ class CoreDNSCharm(CharmBase):
     def is_running(self):
         """Determine if a given service is running in a given container"""
         try:
-            container = self.unit.get_container(self._COREDNS_CONTAINER)
-            service = container.get_service(self._COREDNS_CONTAINER)
+            container = self.unit.get_container(self.meta.name)
+            service = container.get_service(self.meta.name)
         except (ModelError, PebbleError):
             return False
         return service.current == ServiceStatus.ACTIVE
@@ -72,23 +67,24 @@ class CoreDNSCharm(CharmBase):
             return
 
         layer = self._coredns_layer()
-        container.add_layer(self._COREDNS_CONTAINER, layer, combine=True)
+        container.add_layer(self.meta.name, layer, combine=True)
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
+        self._patch_statefulset()
         container.autostart()
         self._on_update_status(event)
 
     def _on_config_changed(self, event):
         """Process charm config changes and restart CoreDNS workload"""
-        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        container = self.unit.get_container(self.meta.name)
         if not self.is_running:
             logger.info("CoreDNS is not running")
             return
 
         self._push_corefile_config(event)
         self._apply_rbac_policy(event)
-        container.stop(self._COREDNS_CONTAINER)
-        container.start(self._COREDNS_CONTAINER)
+        container.stop(self.meta.name)
+        container.start(self.meta.name)
 
         # Update the domain data in the relation in case the domain changed
         if self.unit.is_leader():
@@ -139,7 +135,7 @@ class CoreDNSCharm(CharmBase):
             "summary": "CoreDNS layer",
             "description": "pebble config layer for CoreDNS",
             "services": {
-                self._COREDNS_CONTAINER: {
+                self.meta.name: {
                     "override": "replace",
                     "summary": "CoreDNS",
                     "command": "/coredns -conf /etc/coredns/Corefile",
@@ -150,7 +146,7 @@ class CoreDNSCharm(CharmBase):
 
     def _push_corefile_config(self, event):
         """Push corefile config to CoreDNS container"""
-        container = self.unit.get_container(self._COREDNS_CONTAINER)
+        container = self.unit.get_container(self.meta.name)
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
         container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
@@ -158,7 +154,7 @@ class CoreDNSCharm(CharmBase):
     def _apply_rbac_policy(self, _event) -> Optional[str]:
         if not self.unit.is_leader():
             return
-        client = Client(field_manager=self.model.name, namespace=self.model.name)
+        logger.info("Applying RBAC policies")
         self._stored.forbidden = False
         with Path("files", "rbac-policy.yaml").open() as f:
             for policy in codecs.load_all_yaml(f):
@@ -166,11 +162,20 @@ class CoreDNSCharm(CharmBase):
                     for subject in policy.subjects:
                         subject.namespace = self.model.name
                 try:
-                    client.apply(policy)
+                    self.client.apply(policy, force=True)
                 except ApiError as err:
                     self._stored.forbidden |= err.status.code == 403
                     if not self._stored.forbidden:
                         raise
+
+    def _patch_statefulset(self):
+        if not self.unit.is_leader():
+            return
+        logger.info(f"Patching Default dnsPolicy for {self.meta.name} statefulset")
+        patch = {"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
+        self.client.patch(
+            StatefulSet, name=self.meta.name, namespace=self.model.name, obj=patch
+        )
 
 
 if __name__ == "__main__":
