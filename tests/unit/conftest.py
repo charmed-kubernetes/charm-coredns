@@ -22,8 +22,10 @@ def mocked_lightkube_client(mocker):
 @pytest.fixture()
 def harness(mocker):
     harness = Harness(CoreDNSCharm)
+    harness.set_model_name("coredns-model")
     harness.set_leader(True)
     harness.begin_with_initial_hooks()
+    harness.container_pebble_ready("coredns")
     harness.model.get_binding = mocker.MagicMock()
     return harness
 
@@ -66,6 +68,7 @@ def inactive_container(mocker, container, inactive_service):
 @pytest.fixture()
 def relation_harness(mocker):
     harness = Harness(CoreDNSCharm)
+    harness.set_can_connect("coredns", True)
     container = harness.model.unit.get_container("coredns")
     container.stop = mocker.MagicMock()
     container.start = mocker.MagicMock()
