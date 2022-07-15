@@ -13,7 +13,7 @@ bases:
         - amd64
         - arm
         - arm64
-        - mips64le
+        #- mips64le  # removed due to lack of juju support
         - ppc64le
         - s390x
     - name: "ubuntu"
@@ -22,7 +22,7 @@ bases:
         - amd64
         - arm
         - arm64
-        - mips64le
+        #- mips64le  # removed due to lack of juju support
         - ppc64le
         - s390x
 parts:
