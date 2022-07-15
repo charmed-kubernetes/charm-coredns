@@ -1,13 +1,30 @@
+# Architectures based on supported arch's in upstream
+# https://github.com/coredns/coredns/blob/ddee42c974d89d9beb4ebf7b82019624fbf0c456/Makefile.docker#L35
 type: charm
 bases:
   - build-on:
     - name: "ubuntu"
       channel: "20.04"
+      architectures: ["amd64"]
     run-on:
     - name: "ubuntu"
       channel: "20.04"
+      architectures:
+        - amd64
+        - arm
+        - arm64
+        - mips64le
+        - ppc64le
+        - s390x
     - name: "ubuntu"
       channel: "22.04"
+      architectures:
+        - amd64
+        - arm
+        - arm64
+        - mips64le
+        - ppc64le
+        - s390x
 parts:
   charm:
     build-packages: [git]
