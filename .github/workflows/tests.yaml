@@ -4,108 +4,55 @@ on:
   - pull_request
 
 jobs:
-  lint-and-unit-tests:
-    name: Lint & Unit tests
-    runs-on: ubuntu-latest
+  call-inclusive-naming-check:
+    name: Inclusive naming
+    uses: canonical-web-and-design/Inclusive-naming/.github/workflows/woke.yaml@main
+    with:
+      fail-on-error: "true"
+
+  lint-unit:
+    name: Lint Unit
+    uses: charmed-kubernetes/workflows/.github/workflows/lint-unit.yaml@main
+    needs:
+      - call-inclusive-naming-check
+    with:
+      python: "['3.8', '3.9', '3.10']"
+
+  integration-test:
+    name: VSphere Integration Test
+    runs-on: self-hosted
+    timeout-minutes: 90
+    needs:
+      - lint-unit
     steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-    - name: Setup Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install Tox
-      run: pip install tox
-    - name: Run lint & unit tests
-      run: tox
-
-  func-test:
-    name: Functional test with MicroK8s
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Check out repo
-      uses: actions/checkout@v2
-
-    - name: Install LXD
-      run: |
-        set -eux
-        sudo snap refresh lxd --classic --channel=latest/stable
-        sudo usermod -a -G lxd $USER
-        sudo lxd init --auto
-
-    - name: Install MicroK8s
-      uses: balchua/microk8s-actions@v0.2.2
-      with:
-        channel: 'latest/stable'
-        addons: '["dns", "storage", "rbac"]'
-
-    - name: Install Dependencies
-      run: |
-        set -eux
-        sudo snap install charmcraft --classic --channel=latest/edge
-        sudo snap install juju --classic
-        sudo snap install juju-wait --classic
-        sudo snap list
-        sudo apt update
-        sudo apt install tox
-
-    - name: Wait before bootstrap
-      run: |
-        set -eux
-        sg microk8s -c 'microk8s status --wait-ready'
-        kubectl wait --for=condition=available --timeout=5m -nkube-system deployment/coredns deployment/hostpath-provisioner
-
-    - name: Bootstrap MicroK8s with Juju
-      run: |
-        sg microk8s 'juju bootstrap microk8s microk8s'
-        sg microk8s 'juju add-model coredns microk8s'
-        sg microk8s 'juju add-model coredns-client microk8s'
-
-    - name: Run Integration tests
-      run: |
-        KUBECONFIG=/home/runner/.kube/config tox -e integration -- --model=coredns --client-model=coredns-client
-      timeout-minutes: 20
-
-    - name: Setup Debug Artifact Collection
-      run: mkdir tmp
-      if: failure()
-
-    - name: Collect pytest logs
-      if: failure()
-      run: cat .tox/integration/log/pytest-* | tee tmp/pytest.log
-
-    - name: Collect charmcraft logs
-      if: failure()
-      run: |
-        cat /home/runner/snap/charmcraft/common/cache/charmcraft/log/charmcraft-* | tee tmp/charmcraft.log
-        cat /home/runner/snap/charmcraft/common/charmcraft-log-* | tee tmp/charmcraft.log
-    - name: Collect Juju status
-      if: failure()
-      run: juju status | tee tmp/juju-status.txt
-
-    - name: Collect Juju log
-      if: failure()
-      run: juju debug-log --replay --no-tail | tee tmp/juju-status.txt
-
-    - name: Collect Kube status
-      if: failure()
-      run: |
-        kubectl get all -A | tee tmp/kube-summary.txt
-        kubectl describe virtualservices -A | tee tmp/kube-virtualservices.txt
-        kubectl describe gateways -A | tee tmp/kube-gateways.txt
-        kubectl describe deployments -A | tee tmp/kube-deployments.txt
-        kubectl describe replicasets -A | tee tmp/kubectl-replicasets.txt
-
-    - name: Collect Kube logs
-      if: failure()
-      run: |
-        kubectl logs -n coredns -l app.kubernetes.io/name=coredns --container "charm coredns" | tee tmp/coredns.log
-        kubectl logs -n coredns-client -l app.kubernetes.io/name=dns-provider-test --container httpbin | tee tmp/dns-provider-test.log
-
-    - name: Upload debug artifacts
-      if: failure()
-      uses: actions/upload-artifact@v2
-      with:
-        name: test-run-artifacts
-        path: tmp
+      - name: Check out code
+        uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Setup operator environment
+        uses: charmed-kubernetes/actions-operator@main
+        with:
+          provider: vsphere
+          credentials-yaml: ${{ secrets.CREDENTIALS_YAML }}
+          clouds-yaml: ${{ secrets.CLOUDS_YAML }}
+          bootstrap-constraints: "arch=amd64 cores=2 mem=4G"
+          bootstrap-options: "${{ secrets.FOCAL_BOOTSTRAP_OPTIONS }} --model-default datastore=vsanDatastore --model-default primary-network=VLAN_2763"
+      - name: Run test
+        run: tox -e integration -- --model-config=.github/data/proxy_config.yaml
+      - name: Setup Debug Artifact Collection
+        if: ${{ failure() }}
+        run: mkdir tmp
+      - name: Collect Juju Status
+        if: ${{ failure() }}
+        run: |
+          juju status 2>&1 | tee tmp/juju-status.txt
+          juju-crashdump -s -m controller -a debug-layer -a config -o tmp/
+          mv juju-crashdump-* tmp/ | true
+      - name: Upload debug artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: test-run-artifacts
+          path: tmp

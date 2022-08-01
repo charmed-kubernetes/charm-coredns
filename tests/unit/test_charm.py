@@ -1,21 +1,14 @@
 from unittest.mock import call
 import logging
-from charm import CoreDNSCharm
-from ops.testing import Harness
+import ops.testing
 from string import Template
+from lightkube.resources.apps_v1 import StatefulSet
 
 logger = logging.getLogger(__name__)
+ops.testing.SIMULATE_CAN_CONNECT = True
 
 
-def test_not_leader():
-    harness = Harness(CoreDNSCharm)
-    harness.begin()
-    assert harness.charm.model.unit.status.name == "waiting"
-
-
-def test_coredns_pebble_ready(harness, container):
-    initial_plan = harness.get_container_pebble_plan("coredns")
-    assert initial_plan.to_yaml() == "{}\n"
+def test_coredns_pebble_ready(harness, container, mocked_lightkube_client):
     expected_plan = {
         "services": {
             "coredns": {
@@ -26,12 +19,20 @@ def test_coredns_pebble_ready(harness, container):
             }
         },
     }
-    harness.charm.on.coredns_pebble_ready.emit(container)
-    updated_plan = harness.get_container_pebble_plan("coredns").to_dict()
-    assert expected_plan == updated_plan
+    actual_plan = harness.get_container_pebble_plan("coredns").to_dict()
+    assert expected_plan == actual_plan
     service = harness.model.unit.get_container("coredns").get_service("coredns")
     assert service.is_running()
     assert harness.model.unit.status.name == "active"
+
+    # testing that the dnsPolicy is patched via lightkube
+    patch = mocked_lightkube_client.return_value.patch
+    patch.assert_called_once_with(
+        StatefulSet,
+        name="coredns",
+        namespace="coredns-model",
+        obj={"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}},
+    )
 
 
 def test_coredns_pebble_ready_already_started(harness, active_container, caplog):
