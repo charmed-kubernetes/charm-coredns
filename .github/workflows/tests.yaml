@@ -41,7 +41,7 @@ jobs:
           bootstrap-options: "${{ secrets.FOCAL_BOOTSTRAP_OPTIONS }} --model-default datastore=vsanDatastore --model-default primary-network=VLAN_2763"
       - name: Run test
         run: |
-          juju model-config -m logging-config='<root>=DEBUG; #charmhub=TRACE'
+          juju model-config -m controller logging-config='<root>=DEBUG; #charmhub=TRACE'
           tox -e integration -- --model-config=.github/data/proxy_config.yaml
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
