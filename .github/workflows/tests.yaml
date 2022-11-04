@@ -40,7 +40,9 @@ jobs:
           bootstrap-constraints: "arch=amd64 cores=2 mem=4G"
           bootstrap-options: "${{ secrets.FOCAL_BOOTSTRAP_OPTIONS }} --model-default datastore=vsanDatastore --model-default primary-network=VLAN_2763"
       - name: Run test
-        run: tox -e integration -- --model-config=.github/data/proxy_config.yaml
+        run: |
+          juju model-config -m logging-config='<root>=DEBUG; #charmhub=TRACE'
+          tox -e integration -- --model-config=.github/data/proxy_config.yaml
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
         run: mkdir tmp
@@ -48,6 +50,7 @@ jobs:
         if: ${{ failure() }}
         run: |
           juju status 2>&1 | tee tmp/juju-status.txt
+          juju scp -m controller 0:/varl/log/juju/machine-0.log tmp/
           juju-crashdump -s -m controller -a debug-layer -a config -o tmp/
           mv juju-crashdump-* tmp/ | true
       - name: Upload debug artifacts
