@@ -42,7 +42,7 @@ jobs:
       - name: Run test
         run: |
           juju model-config -m controller logging-config='<root>=DEBUG; #charmhub=TRACE'
-          tox -e integration -- --model-config=.github/data/proxy_config.yaml
+          tox -e integration
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
         run: mkdir tmp
