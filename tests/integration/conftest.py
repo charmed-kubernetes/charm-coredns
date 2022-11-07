@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 import random
 import string
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 import yaml
@@ -46,7 +47,9 @@ async def charmed_kubernetes(ops_test):
             deploy, control_plane_app = False, control_plane_apps[0]
 
         if deploy:
-            await model.deploy("kubernetes-core", channel="latest/edge")
+            cmd = f"juju deploy -m {ops_test.model_full_name} kubernetes-core --channel=latest/edge"
+            await ops_test.run(*shlex.split(cmd), check=True)
+            # await model.deploy("kubernetes-core", channel="latest/edge")
 
         await model.wait_for_idle(status="active", timeout=60 * 60)
         kubeconfig_path = ops_test.tmp_path / "kubeconfig"

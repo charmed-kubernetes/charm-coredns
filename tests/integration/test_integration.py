@@ -7,7 +7,7 @@ log = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy_autoscaler_charm(ops_test, coredns_model):
+async def test_build_and_deploy(ops_test, coredns_model):
     _, k8s_alias = coredns_model
     metadata = yaml.safe_load(Path("metadata.yaml").read_text())
     image = metadata["resources"]["coredns-image"]["upstream-source"]
