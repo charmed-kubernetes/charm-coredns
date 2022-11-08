@@ -1,13 +1,14 @@
 import logging
 from pathlib import Path
 import pytest
+import shlex
 import yaml
 
 log = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy_autoscaler_charm(ops_test, coredns_model):
+async def test_build_and_deploy(ops_test, coredns_model):
     _, k8s_alias = coredns_model
     metadata = yaml.safe_load(Path("metadata.yaml").read_text())
     image = metadata["resources"]["coredns-image"]["upstream-source"]
@@ -18,11 +19,19 @@ async def test_build_and_deploy_autoscaler_charm(ops_test, coredns_model):
             log.info("Building Charm...")
             charm = await ops_test.build_charm(".")
 
-        await m.deploy(
-            entity_url=charm.resolve(),
-            trust=True,
-            resources={"coredns-image": image},
+        cmd = (
+            f"juju deploy -m {ops_test.model_full_name} "
+            f"{charm.resolve()} "
+            f"--resource coredns-image={image} "
+            "--trust"
         )
+        await ops_test.run(*shlex.split(cmd), check=True)
+
+        # await m.deploy(
+        #     entity_url=charm.resolve(),
+        #     trust=True,
+        #     resources={"coredns-image": image},
+        # )
 
         await m.block_until(lambda: "coredns" in m.applications, timeout=60)
 
