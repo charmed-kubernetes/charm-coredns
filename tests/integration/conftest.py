@@ -4,7 +4,6 @@ import os
 import juju.utils
 from juju.tag import untag
 import pytest
-import pytest_asyncio
 import random
 import string
 import shlex
