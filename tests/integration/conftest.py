@@ -165,8 +165,12 @@ async def coredns_model(k8s_cloud, ops_test):
 async def related(ops_test, coredns_model):
     coredns_model_obj, k8s_alias = coredns_model
     app_name = "coredns"
+    k8s_cp = ops_test.model.applications["kubernetes-control-plane"]
     machine_model_name = ops_test.model_name
     model_owner = untag("user-", coredns_model_obj.info.owner_tag)
+    log.info("Configure dns-provider to none")
+    await k8s_cp.set_config({"dns-provider": "none"})
+
     with ops_test.model_context(k8s_alias) as m:
         offer, saas = None, None
         log.info("Creating CMR offer")
@@ -179,9 +183,7 @@ async def related(ops_test, coredns_model):
         f"{model_owner}/{coredns_model_name}.{app_name}"
     )
     log.info("Relating ...")
-    await ops_test.model.add_relation(
-        "kubernetes-control-plane", f"{app_name}:dns-provider"
-    )
+    await ops_test.model.add_relation(k8s_cp.name, f"{app_name}:dns-provider")
     with ops_test.model_context(k8s_alias) as coredns_model:
         await coredns_model.wait_for_idle(status="active")
     await ops_test.model.wait_for_idle(status="active")
@@ -200,6 +202,7 @@ async def related(ops_test, coredns_model):
                 )
         except Exception:
             log.exception("Error performing cleanup")
+        await ops_test.model.wait_for_idle(status="active")
 
 
 @pytest.fixture(scope="class")
