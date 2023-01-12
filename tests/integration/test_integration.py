@@ -38,9 +38,9 @@ async def test_build_and_deploy(ops_test, coredns_model):
         await m.wait_for_idle(status="active")
 
 
-@pytest.mark.usefixtures("validate_dns_pod", "related")
-class DnsTests:
-    async def test_internal_resolution(ops_test, k8s_client, coredns_ip):
+@pytest.mark.usefixtures("related", "validate_dns_pod")
+class TestResolution:
+    async def test_internal_resolution(self, ops_test, k8s_client, coredns_ip):
         _, namespace = k8s_client
         log.info("Testing internal resolution ...")
         rc, stdout, stderr = await ops_test.run(
@@ -61,7 +61,7 @@ class DnsTests:
         ), f"stdout: {stdout}\n stderr: {stderr}"
         assert rc == 0
 
-    async def test_external_resolution(ops_test, k8s_client, coredns_ip):
+    async def test_external_resolution(self, ops_test, k8s_client, coredns_ip):
         _, namespace = k8s_client
         log.info("Testing external resolution ...")
         rc, stdout, stderr = await ops_test.run(
