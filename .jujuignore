@@ -1,0 +1,6 @@
+build/
+*.charm
+juju-crashdump-*
+__pycache__/
+.coverage
+.vscode/

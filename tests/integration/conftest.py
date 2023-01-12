@@ -4,7 +4,6 @@ import os
 import juju.utils
 from juju.tag import untag
 import pytest
-import pytest_asyncio
 import random
 import string
 import shlex
@@ -29,7 +28,7 @@ def pytest_addoption(parser):
     )
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="module")
 async def charmed_kubernetes(ops_test):
     with ops_test.model_context("main") as model:
         deploy, control_plane_app = True, "kubernetes-control-plane"
@@ -76,7 +75,7 @@ def module_name(request):
     return request.module.__name__.replace("_", "-")
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="module")
 async def k8s_cloud(charmed_kubernetes, ops_test, request, module_name):
     """Use an existing k8s-cloud or create a k8s-cloud
     for deploying a new k8s model into"""
@@ -113,7 +112,7 @@ async def k8s_cloud(charmed_kubernetes, ops_test, request, module_name):
         )
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="module")
 async def k8s_client(charmed_kubernetes, request, module_name):
     rand_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
     namespace = f"{module_name}-{rand_str}"
@@ -131,7 +130,7 @@ async def k8s_client(charmed_kubernetes, request, module_name):
     client.delete(Namespace, namespace)
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="module")
 async def coredns_model(k8s_cloud, ops_test):
     model_alias = "coredns-model"
     log.info("Creating CoreDNS model ...")
@@ -140,6 +139,10 @@ async def coredns_model(k8s_cloud, ops_test):
     )
     model_uuid = model.info.uuid
     yield model, model_alias
+
+    if model.applications.get("coredns"):
+        await model.remove_application("coredns", force=True)
+
     timeout = 5 * 60
     await ops_test.forget_model(model_alias, timeout=timeout, allow_failure=False)
 
@@ -158,12 +161,16 @@ async def coredns_model(k8s_cloud, ops_test):
     log.info("CoreDNS model removed")
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="class")
 async def related(ops_test, coredns_model):
     coredns_model_obj, k8s_alias = coredns_model
     app_name = "coredns"
+    k8s_cp = ops_test.model.applications["kubernetes-control-plane"]
     machine_model_name = ops_test.model_name
     model_owner = untag("user-", coredns_model_obj.info.owner_tag)
+    log.info("Configure dns-provider to none")
+    await k8s_cp.set_config({"dns-provider": "none"})
+
     with ops_test.model_context(k8s_alias) as m:
         offer, saas = None, None
         log.info("Creating CMR offer")
@@ -176,9 +183,7 @@ async def related(ops_test, coredns_model):
         f"{model_owner}/{coredns_model_name}.{app_name}"
     )
     log.info("Relating ...")
-    await ops_test.model.add_relation(
-        "kubernetes-control-plane", f"{app_name}:dns-provider"
-    )
+    await ops_test.model.add_relation(k8s_cp.name, f"{app_name}:dns-provider")
     with ops_test.model_context(k8s_alias) as coredns_model:
         await coredns_model.wait_for_idle(status="active")
     await ops_test.model.wait_for_idle(status="active")
@@ -197,9 +202,10 @@ async def related(ops_test, coredns_model):
                 )
         except Exception:
             log.exception("Error performing cleanup")
+        await ops_test.model.wait_for_idle(status="active")
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="class")
 def validate_dns_pod(ops_test, k8s_client):
     client, namespace = k8s_client
     log.info("Creating pod for dns validation ...")
@@ -218,7 +224,7 @@ def validate_dns_pod(ops_test, k8s_client):
         client.delete(type(obj), obj.metadata.name)
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="class")
 def coredns_ip(ops_test, coredns_model, k8s_client):
     coredns_model_obj, k8s_alias = coredns_model
     client, _ = k8s_client
