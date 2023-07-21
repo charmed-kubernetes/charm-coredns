@@ -42,7 +42,6 @@ def test_coredns_pebble_ready_already_started(harness, active_container, caplog)
 
 
 def test_config_changed(harness, active_container, caplog):
-
     extra_servers = """. {
 log
 }
