@@ -42,7 +42,7 @@ jobs:
           juju-channel: 3.1/stable
       - name: Run test
         run: |
-          tox -e integration -- --model-config=.github/data/proxy_config.yaml
+          tox -e integration -- --basetemp=/home/ubuntu/pytest --model-config=.github/data/proxy_config.yaml
       - name: Setup Debug Artifact Collection
         if: ${{ failure() }}
         run: mkdir tmp
