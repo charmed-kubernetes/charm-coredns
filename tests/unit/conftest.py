@@ -1,8 +1,10 @@
-import pytest
 from unittest.mock import patch
-from charm import CoreDNSCharm
-from ops.testing import Harness
+
+import pytest
 from ops.pebble import ServiceStatus
+from ops.testing import Harness
+
+from charm import CoreDNSCharm
 
 
 # Autouse to prevent calling out to the k8s API via lightkube

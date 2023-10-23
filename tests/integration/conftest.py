@@ -1,21 +1,18 @@
 import logging
 import os
-
-import juju.utils
-from juju.tag import untag
-import pytest
 import random
-import string
 import shlex
+import string
 from pathlib import Path
 from types import SimpleNamespace
+
+import juju.utils
+import pytest
 import yaml
-
-from lightkube import KubeConfig, Client, codecs
-from lightkube.resources.core_v1 import Namespace
+from juju.tag import untag
+from lightkube import Client, KubeConfig, codecs
 from lightkube.models.meta_v1 import ObjectMeta
-from lightkube.resources.core_v1 import Pod, Service
-
+from lightkube.resources.core_v1 import Namespace, Pod, Service
 
 log = logging.getLogger(__name__)
 

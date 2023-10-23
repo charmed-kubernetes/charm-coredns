@@ -1,7 +1,8 @@
-from unittest.mock import call
 import logging
-import ops.testing
 from string import Template
+from unittest.mock import call
+
+import ops.testing
 from lightkube.resources.apps_v1 import StatefulSet
 
 logger = logging.getLogger(__name__)

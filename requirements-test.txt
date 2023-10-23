@@ -1,6 +1,8 @@
 -r requirements.txt
-flake8
+codespell
 black
+isort
+ruff
 pytest-cov
 pytest-operator
 pytest-mock

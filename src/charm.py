@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 
 import logging
+from pathlib import Path
 from string import Template
+from typing import Optional
+
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
+from lightkube import ApiError, Client, codecs
+from lightkube.models.core_v1 import ServicePort
+from lightkube.resources.apps_v1 import StatefulSet
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.model import (
-    BlockedStatus,
     ActiveStatus,
-    WaitingStatus,
+    BlockedStatus,
     MaintenanceStatus,
     ModelError,
+    WaitingStatus,
 )
-from ops.pebble import ServiceStatus
 from ops.pebble import Error as PebbleError
-from pathlib import Path
-from lightkube.models.core_v1 import ServicePort
-from lightkube.resources.apps_v1 import StatefulSet
-from lightkube import Client, codecs, ApiError
-from typing import Optional
+from ops.pebble import ServiceStatus
 
 logger = logging.getLogger(__name__)
 
