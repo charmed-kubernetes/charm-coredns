@@ -11,7 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Iterable, List, Set, TypedDict
+from typing import Iterable, List, Optional, Set, TypedDict
 
 import yaml
 from semver import VersionInfo
@@ -20,25 +20,49 @@ log = logging.getLogger("CoreDNS Image Update")
 logging.basicConfig(level=logging.INFO)
 DH_REPO = "https://hub.docker.com/v2/repositories/coredns/coredns/tags"
 DH_IMAGE = "docker.io/coredns/coredns:{tag}"
+ROCKS_CC = "upload.rocks.canonical.com:5000/cdk"
 
 
 @dataclass(frozen=True)
 class Registry:
     """Object to define how to contact a Registry."""
 
-    name: str
-    path: str
-    user: str
-    pass_file: str
+    base: str
+    user_pass: Optional[str] = None
 
     @property
-    def creds(self) -> "SyncCreds":
+    def name(self) -> str:
+        name, *_ = self.base.split("/")
+        return name
+
+    @property
+    def path(self) -> List[str]:
+        _, *path = self.base.split("/")
+        return path
+
+    @property
+    def user(self) -> str:
+        user, _ = self.user_pass.split(":", 1)
+        return user
+
+    @property
+    def password(self) -> str:
+        _, pw = self.user_pass.split(":", 1)
+        return pw
+
+    @property
+    def creds(self) -> List["SyncCreds"]:
         """Get credentials as a SyncCreds Dict."""
-        return {
-            "registry": self.name,
-            "user": self.user,
-            "pass": Path(self.pass_file).read_text().strip(),
-        }
+        creds = []
+        if self.user_pass:
+            creds.append(
+                {
+                    "registry": self.name,
+                    "user": self.user,
+                    "pass": self.password,
+                }
+            )
+        return creds
 
 
 SyncAsset = TypedDict("SyncAsset", {"source": str, "target": str, "type": str})
@@ -55,8 +79,9 @@ class SyncConfig(TypedDict):
 
 def sync_asset(image: str, registry: Registry):
     """Factory for generating SyncAssets."""
-    _, tag = image.split("/", 1)
-    dest = f"{registry.name}/{registry.path.strip('/')}/{tag}"
+    _, *name_tag = image.split("/")
+    full_path = "/".join(registry.path + name_tag)
+    dest = f"{registry.name}/{full_path}"
     return SyncAsset(source=image, target=dest, type="image")
 
 
@@ -73,18 +98,20 @@ def gather_releases() -> Set[str]:
     return images
 
 
-def mirror_image(images: Iterable[str], registry: Registry, check: bool):
+def mirror_image(images: Iterable[str], registry: Registry, check: bool, debug: bool):
     """Synchronize all source images to target registry, only pushing changed layers."""
     sync_config = SyncConfig(
         version=1,
-        creds=[registry.creds],
+        creds=registry.creds,
         sync=[sync_asset(DH_IMAGE.format(tag=image), registry) for image in images],
     )
     with NamedTemporaryFile(mode="w") as tmpfile:
         yaml.safe_dump(sync_config, tmpfile)
-        check = "check" if check else "once"
+        command = "check" if check else "once"
+        args = ["regsync", "-c", tmpfile.name, command]
+        args += ["-v", "debug"] if debug else []
         proc = subprocess.Popen(
-            ["regsync", "-c", tmpfile.name, check, "-v", "debug"],
+            args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             encoding="utf-8",
@@ -116,22 +143,31 @@ def get_argparser():
     )
     parser.add_argument(
         "--registry",
-        default=None,
+        default=ROCKS_CC,
         type=str,
-        nargs=4,
         help="Registry to which images should be mirrored.\n\n"
         "example\n"
-        "  --registry my.registry:5000 path username password-file\n"
-        "\n"
-        "Mirroring depends on binary regsync "
-        "(https://github.com/regclient/regclient/releases)\n"
-        "and that it is available in the current working directory",
+        "  --registry my.registry:5000/path\n"
+        "\n",
+    )
+    parser.add_argument(
+        "--user_pass",
+        default=None,
+        type=str,
+        help="Username and password for the registry separated by a colon\n\n"
+        "if missing, regsync will attempt to use authfrom ${HOME}/.docker/config.json\n"
+        "example\n"
+        "  --user-pass myuser:mypassword\n"
+        "\n",
     )
     parser.add_argument(
         "--check",
         action="store_true",
         help="If selected, will not run the sync\n"
         "but instead checks if a sync is necessary",
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="If selected, regsync debug will appear"
     )
     return parser
 
@@ -141,6 +177,6 @@ if __name__ == "__main__":
     all_images = gather_releases()
     sorted_images = sorted(all_images, key=VersionInfo.parse, reverse=True)
     update_metadata(sorted_images[0])
-    if args.registry:
-        mirror_image(all_images, Registry(*args.registry), args.check)
-
+    mirror_image(
+        all_images, Registry(args.registry, args.user_pass), args.check, args.debug
+    )
