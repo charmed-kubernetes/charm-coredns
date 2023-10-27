@@ -19,6 +19,6 @@ resources:
   coredns-image:
     type: oci-image
     description: 'CoreDNS image'
-    upstream-source: coredns/coredns:1.10.1
+    upstream-source: rocks.canonical.com/cdk/coredns/coredns:1.11.1
 assumes:
   - k8s-api
