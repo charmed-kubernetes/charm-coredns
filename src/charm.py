@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
-
+"""Charmed Operator for CoreDNS."""
 import logging
+from pathlib import Path
 from string import Template
+from typing import Optional
+
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
+from lightkube import ApiError, Client, codecs
+from lightkube.models.core_v1 import ServicePort
+from lightkube.resources.apps_v1 import StatefulSet
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import (
-    BlockedStatus,
-    ActiveStatus,
-    WaitingStatus,
-    MaintenanceStatus,
-    ModelError,
-)
-from ops.pebble import ServiceStatus
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
 from ops.pebble import Error as PebbleError
-from pathlib import Path
-from lightkube.models.core_v1 import ServicePort
-from lightkube.resources.apps_v1 import StatefulSet
-from lightkube import Client, codecs, ApiError
-from typing import Optional
+from ops.pebble import ServiceStatus
 
 logger = logging.getLogger(__name__)
 
 
 class CoreDNSCharm(CharmBase):
-    """CoreDNS Sidecar Charm"""
+    """CoreDNS Sidecar Charm."""
 
     _stored = StoredState()
 
@@ -38,9 +33,7 @@ class CoreDNSCharm(CharmBase):
         metrics = ServicePort(9153, protocol="TCP", name="metrics")
         self.service_patcher = KubernetesServicePatch(self, [dns_udp, dns_tcp, metrics])
 
-        self.framework.observe(
-            self.on.coredns_pebble_ready, self._on_coredns_pebble_ready
-        )
+        self.framework.observe(self.on.coredns_pebble_ready, self._on_coredns_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
             self.on.dns_provider_relation_created,
@@ -51,7 +44,7 @@ class CoreDNSCharm(CharmBase):
 
     @property
     def is_running(self):
-        """Determine if a given service is running in a given container"""
+        """Determine if a given service is running in a given container."""
         try:
             container = self.unit.get_container(self.meta.name)
             service = container.get_service(self.meta.name)
@@ -60,7 +53,7 @@ class CoreDNSCharm(CharmBase):
         return service.current == ServiceStatus.ACTIVE
 
     def _on_coredns_pebble_ready(self, event):
-        """Define and start CoreDNS workload"""
+        """Define and start CoreDNS workload."""
         container = event.workload
         if self.is_running:
             logger.info("CoreDNS already started")
@@ -75,7 +68,7 @@ class CoreDNSCharm(CharmBase):
         self._on_update_status(event)
 
     def _on_config_changed(self, event):
-        """Process charm config changes and restart CoreDNS workload"""
+        """Process charm config changes and restart CoreDNS workload."""
         container = self.unit.get_container(self.meta.name)
         if not self.is_running:
             logger.info("CoreDNS is not running")
@@ -100,13 +93,11 @@ class CoreDNSCharm(CharmBase):
         self._on_update_status(event)
 
     def _on_dns_provider_relation_created(self, event):
-        """Provide relation data on dns-provider relation created"""
+        """Provide relation data on dns-provider relation created."""
         if self.unit.is_leader():
             ingress_address = event.relation.data[self.unit].get("ingress-address")
             if not ingress_address:
-                logger.info(
-                    "ingress-address is not present in relation data, deferring"
-                )
+                logger.info("ingress-address is not present in relation data, deferring")
                 self.unit.status = MaintenanceStatus("Waiting on ingress-address")
                 event.defer()
                 return
@@ -121,7 +112,7 @@ class CoreDNSCharm(CharmBase):
         self._on_update_status(event)
 
     def _on_update_status(self, event):
-        """Update Juju status"""
+        """Update Juju status."""
         if not self.is_running:
             self.unit.status = WaitingStatus("CoreDNS is not running")
         elif self._stored.forbidden:
@@ -130,7 +121,7 @@ class CoreDNSCharm(CharmBase):
             self.unit.status = ActiveStatus()
 
     def _coredns_layer(self):
-        """Pebble config layer for CoreDNS"""
+        """Pebble config layer for CoreDNS."""
         return {
             "summary": "CoreDNS layer",
             "description": "pebble config layer for CoreDNS",
@@ -145,7 +136,7 @@ class CoreDNSCharm(CharmBase):
         }
 
     def _push_corefile_config(self, event):
-        """Push corefile config to CoreDNS container"""
+        """Push corefile config to CoreDNS container."""
         container = self.unit.get_container(self.meta.name)
         corefile = Template(self.model.config["corefile"])
         corefile = corefile.safe_substitute(self.model.config)
@@ -173,9 +164,7 @@ class CoreDNSCharm(CharmBase):
             return
         logger.info(f"Patching Default dnsPolicy for {self.meta.name} statefulset")
         patch = {"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
-        self.client.patch(
-            StatefulSet, name=self.meta.name, namespace=self.model.name, obj=patch
-        )
+        self.client.patch(StatefulSet, name=self.meta.name, namespace=self.model.name, obj=patch)
 
 
 if __name__ == "__main__":

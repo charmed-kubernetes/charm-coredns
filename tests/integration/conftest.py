@@ -1,21 +1,18 @@
 import logging
 import os
-
-import juju.utils
-from juju.tag import untag
-import pytest
 import random
-import string
 import shlex
+import string
 from pathlib import Path
 from types import SimpleNamespace
+
+import juju.utils
+import pytest
 import yaml
-
-from lightkube import KubeConfig, Client, codecs
-from lightkube.resources.core_v1 import Namespace
+from juju.tag import untag
+from lightkube import Client, KubeConfig, codecs
 from lightkube.models.meta_v1 import ObjectMeta
-from lightkube.resources.core_v1 import Pod, Service
-
+from lightkube.resources.core_v1 import Namespace, Pod, Service
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +37,7 @@ async def charmed_kubernetes(ops_test):
                 if "kubernetes-control-plane" in app.charm_url
             ]
             if not control_plane_apps:
-                pytest.fail(
-                    f"Model {current_model} doesn't contain {control_plane_app} charm"
-                )
+                pytest.fail(f"Model {current_model} doesn't contain {control_plane_app} charm")
             deploy, control_plane_app = False, control_plane_apps[0]
 
         if deploy:
@@ -77,8 +72,7 @@ def module_name(request):
 
 @pytest.fixture(scope="module")
 async def k8s_cloud(charmed_kubernetes, ops_test, request, module_name):
-    """Use an existing k8s-cloud or create a k8s-cloud
-    for deploying a new k8s model into"""
+    """Use an existing k8s-cloud or create a k8s-cloud for deploying a new k8s model into."""
     cloud_name = request.config.option.k8s_cloud or f"{module_name}-k8s-cloud"
     controller = await ops_test.model.get_controller()
     current_clouds = await controller.clouds()
@@ -179,9 +173,7 @@ async def related(ops_test, coredns_model):
 
     log.info("Consuming CMR offer")
     log.info(f"{machine_model_name} consuming CMR offer from {coredns_model_name}")
-    saas = await ops_test.model.consume(
-        f"{model_owner}/{coredns_model_name}.{app_name}"
-    )
+    saas = await ops_test.model.consume(f"{model_owner}/{coredns_model_name}.{app_name}")
     log.info("Relating ...")
     await ops_test.model.add_relation(k8s_cp.name, f"{app_name}:dns-provider")
     with ops_test.model_context(k8s_alias) as coredns_model:
@@ -215,9 +207,7 @@ def validate_dns_pod(ops_test, k8s_client):
     for obj in spec:
         client.create(obj)
 
-    client.wait(
-        Pod, "validate-dns", namespace=namespace, for_conditions=("ContainersReady",)
-    )
+    client.wait(Pod, "validate-dns", namespace=namespace, for_conditions=("ContainersReady",))
     yield
     log.info("Removing DNS validation pod ...")
     for obj in spec:

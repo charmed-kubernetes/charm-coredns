@@ -1,7 +1,8 @@
 import logging
-from pathlib import Path
-import pytest
 import shlex
+from pathlib import Path
+
+import pytest
 import yaml
 
 log = logging.getLogger(__name__)
@@ -53,9 +54,7 @@ class TestResolution:
             "nslookup",
             "kubernetes.default.svc.cluster.local",
         )
-        assert (
-            f"Server:\t\t{coredns_ip}" in stdout
-        ), f"stdout: {stdout}\n stderr: {stderr}"
+        assert f"Server:\t\t{coredns_ip}" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
         assert (
             "kubernetes.default.svc.cluster.local" in stdout
         ), f"stdout: {stdout}\n stderr: {stderr}"
@@ -74,10 +73,6 @@ class TestResolution:
             "nslookup",
             "www.ubuntu.com",
         )
-        assert (
-            f"Server:\t\t{coredns_ip}" in stdout
-        ), f"stdout: {stdout}\n stderr: {stderr}"
-        assert (
-            "Non-authoritative answer" in stdout
-        ), f"stdout: {stdout}\n stderr: {stderr}"
+        assert f"Server:\t\t{coredns_ip}" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
+        assert "Non-authoritative answer" in stdout, f"stdout: {stdout}\n stderr: {stderr}"
         assert rc == 0
