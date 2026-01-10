@@ -106,7 +106,9 @@ def test_dns_provider_relation_created_not_running(
     assert relation_harness.model.unit.status.name == "waiting"
 
 
-def test_domain_changed(relation_harness, relation_with_ingress, active_service, mocker):
+def test_domain_changed(
+    relation_harness, relation_with_ingress, active_service, mocker
+):
     container = relation_harness.model.unit.get_container("coredns")
     container.get_service = mocker.MagicMock(return_value=active_service)
     container.push = mocker.MagicMock()

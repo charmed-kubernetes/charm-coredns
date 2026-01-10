@@ -1,171 +1,184 @@
 #!/usr/bin/env python3
-"""Charmed Operator for CoreDNS."""
-import logging
-from pathlib import Path
-from string import Template
-from typing import Optional
+# Copyright 2022 Canonical Ltd.
+# See LICENSE file for licensing details.
+"""Dispatch logic for the vsphere CPI operator charm."""
 
-from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
-from lightkube import ApiError, Client, codecs
-from lightkube.models.core_v1 import ServicePort
-from lightkube.resources.apps_v1 import StatefulSet
-from ops.charm import CharmBase
-from ops.framework import StoredState
-from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
-from ops.pebble import Error as PebbleError
-from ops.pebble import ServiceStatus
+import logging
+
+import ops
+from ops.manifests import Collector, ManifestClientError, Manifests
+import charms.contextual_status as status
+from charms.reconciler import Reconciler
+
+from coredns_manifests import CoreDNSManifests
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
 
-class CoreDNSCharm(CharmBase):
-    """CoreDNS Sidecar Charm."""
+class CoreDNSCharm(ops.CharmBase):
+    """Dispatch logic for the CoreDNS operator charm."""
 
-    _stored = StoredState()
+    stored = ops.StoredState()
 
     def __init__(self, *args):
         super().__init__(*args)
 
-        self.client = Client(field_manager=self.app.name, namespace=self.model.name)
-        dns_udp = ServicePort(53, protocol="UDP", name="dns")
-        dns_tcp = ServicePort(53, protocol="TCP", name="dns-tcp")
-        metrics = ServicePort(9153, protocol="TCP", name="metrics")
-        self.service_patcher = KubernetesServicePatch(self, [dns_udp, dns_tcp, metrics])
+        # Relation Validator and datastore
+        self.reconciler = Reconciler(self, self.reconcile)
 
-        self.framework.observe(self.on.coredns_pebble_ready, self._on_coredns_pebble_ready)
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(
-            self.on.dns_provider_relation_created,
-            self._on_dns_provider_relation_created,
-        )
+        self.framework.observe(self.on.list_versions_action, self._list_versions)
+        self.framework.observe(self.on.list_resources_action, self._list_resources)
+        self.framework.observe(self.on.scrub_resources_action, self._scrub_resources)
+        self.framework.observe(self.on.sync_resources_action, self._sync_resources)
         self.framework.observe(self.on.update_status, self._on_update_status)
-        self._stored.set_default(forbidden=False)
 
-    @property
-    def is_running(self):
-        """Determine if a given service is running in a given container."""
+        # hashed value of the provider config once valid
+        self.stored.set_default(config_hash=0)
+        # whether the manifests are deployed
+        self.stored.set_default(deployed=False)
+        # whether the charm is being destroyed
+        self.stored.set_default(destroying=False)
+
+        self.collector = Collector(CoreDNSManifests(self))
+
+    def _list_versions(self, event: ops.ActionEvent) -> None:
+        self.collector.list_versions(event)
+
+    def _list_resources(self, event: ops.ActionEvent) -> None:
+        manifests = event.params.get("manifest", "")
+        resources = event.params.get("resources", "")
+        self.collector.list_resources(event, manifests, resources)
+
+    def _scrub_resources(self, event: ops.ActionEvent) -> None:
+        manifests = event.params.get("manifest", "")
+        resources = event.params.get("resources", "")
+        self.collector.scrub_resources(event, manifests, resources)
+
+    def _sync_resources(self, event: ops.ActionEvent) -> None:
+        manifests = event.params.get("manifest", "")
+        resources = event.params.get("resources", "")
         try:
-            container = self.unit.get_container(self.meta.name)
-            service = container.get_service(self.meta.name)
-        except (ModelError, PebbleError):
-            return False
-        return service.current == ServiceStatus.ACTIVE
+            self.collector.apply_missing_resources(event, manifests, resources)
+        except ManifestClientError as e:
+            msg = "Failed to sync missing resources: "
+            msg += " -> ".join(map(str, e.args))
+            event.set_results({"result": msg})
+        else:
+            self.stored.deployed = True
 
-    def _on_coredns_pebble_ready(self, event):
-        """Define and start CoreDNS workload."""
-        container = event.workload
-        if self.is_running:
-            logger.info("CoreDNS already started")
+    def _update_status(self) -> None:
+        address = self._dns_address()
+        self._provide_kube_dns(address)
+        if unready := self.collector.unready:
+            status.add(ops.WaitingStatus(", ".join(unready)))
+            raise status.ReconcilerError("Waiting for deployment")
+        elif not self._dns_address():
+            self.unit.status = ops.MaintenanceStatus("Waiting for DNS service address")
+            raise status.ReconcilerError("No service address")
+        else:
+            self.unit.set_workload_version(self.collector.short_version)
+            if self.unit.is_leader():
+                self.app.status = ops.ActiveStatus(self.collector.long_version)
+
+    def _on_update_status(self, _: ops.EventBase) -> None:
+        if not self.reconciler.stored.reconciled:
             return
+        try:
+            with status.context(self.unit):
+                self._update_status()
+        except status.ReconcilerError:
+            logger.exception("Can't update_status")
 
-        layer = self._coredns_layer()
-        container.add_layer(self.meta.name, layer, combine=True)
-        self._push_corefile_config(event)
-        self._apply_rbac_policy(event)
-        self._patch_statefulset()
-        container.autostart()
-        self._on_update_status(event)
+    def _dns_address(self) -> str:
+        """Get the ClusterIP address of the CoreDNS service."""
+        for manifest in self.collector.manifests.values():
+            if not isinstance(manifest, CoreDNSManifests):
+                continue
+            return manifest.get_service_address()
+        return ""
 
-    def _on_config_changed(self, event):
-        """Process charm config changes and restart CoreDNS workload."""
-        container = self.unit.get_container(self.meta.name)
-        if not self.is_running:
-            logger.info("CoreDNS is not running")
-            return
-
-        self._push_corefile_config(event)
-        self._apply_rbac_policy(event)
-        container.stop(self.meta.name)
-        container.start(self.meta.name)
-
-        # Update the domain data in the relation in case the domain changed
-        if self.unit.is_leader():
-            relation = self.model.get_relation("dns-provider")
-            if relation is not None:
-                provided_data = self.model.get_relation("dns-provider").data[self.unit]
-                provided_data.update(
-                    {
+    def _provide_kube_dns(self, cluster_address: str) -> None:
+        """Provide DNS info to the dns-provider relation."""
+        for rel in self.model.relations.get("dns-provider", []):
+            try:
+                rel.data[self.unit].update(
+                    **{
                         "domain": self.model.config["domain"],
+                        "sdn-ip": str(cluster_address),
+                        "port": "53",
                     }
                 )
+            except ops.model.ModelError as e:
+                logger.error(f"Failed to set dns-provider relation data: {e}")
 
-        self._on_update_status(event)
+    def reconcile(self, event: ops.EventBase) -> None:
+        """Reconcile the charm state."""
+        if self._destroying(event):
+            leader = self.unit.is_leader()
+            logger.info("purge manifests if leader(%s) event(%s)", leader, event)
+            if leader:
+                self._purge_all_manifests()
+            return
+        hash = self.evaluate_manifests()
+        self.install_manifests(config_hash=hash)
+        self._update_status()
 
-    def _on_dns_provider_relation_created(self, event):
-        """Provide relation data on dns-provider relation created."""
+    def evaluate_manifests(self) -> int:
+        """Evaluate all manifests."""
+        self.unit.status = ops.MaintenanceStatus("Evaluating CoreDNS")
+        new_hash = 0
+        for manifest in self.collector.manifests.values():
+            if not isinstance(manifest, CoreDNSManifests):
+                continue
+            if evaluation := manifest.evaluate():
+                status.add(ops.BlockedStatus(evaluation))
+                raise status.ReconcilerError(evaluation)
+            new_hash += manifest.hash()
+        return new_hash
+
+    def install_manifests(self, config_hash: int) -> None:
+        if cast(int, self.stored.config_hash) == config_hash:
+            logger.info(f"No config changes detected. config_hash={config_hash}")
+            return
         if self.unit.is_leader():
-            ingress_address = event.relation.data[self.unit].get("ingress-address")
-            if not ingress_address:
-                logger.info("ingress-address is not present in relation data, deferring")
-                self.unit.status = MaintenanceStatus("Waiting on ingress-address")
-                event.defer()
-                return
-            data = event.relation.data[self.unit]
-            data.update(
-                {
-                    "domain": self.model.config["domain"],
-                    "sdn-ip": str(ingress_address),
-                    "port": "53",
-                }
-            )
-        self._on_update_status(event)
-
-    def _on_update_status(self, event):
-        """Update Juju status."""
-        if not self.is_running:
-            self.unit.status = WaitingStatus("CoreDNS is not running")
-        elif self._stored.forbidden:
-            self.unit.status = BlockedStatus("Forbidden to apply RBAC Policies.")
-        else:
-            self.unit.status = ActiveStatus()
-
-    def _coredns_layer(self):
-        """Pebble config layer for CoreDNS."""
-        return {
-            "summary": "CoreDNS layer",
-            "description": "pebble config layer for CoreDNS",
-            "services": {
-                self.meta.name: {
-                    "override": "replace",
-                    "summary": "CoreDNS",
-                    "command": "/coredns -conf /etc/coredns/Corefile",
-                    "startup": "enabled",
-                }
-            },
-        }
-
-    def _push_corefile_config(self, event):
-        """Push corefile config to CoreDNS container."""
-        container = self.unit.get_container(self.meta.name)
-        corefile = Template(self.model.config["corefile"])
-        corefile = corefile.safe_substitute(self.model.config)
-        container.push("/etc/coredns/Corefile", corefile, make_dirs=True)
-
-    def _apply_rbac_policy(self, _event) -> Optional[str]:
-        if not self.unit.is_leader():
-            return
-        logger.info("Applying RBAC policies")
-        self._stored.forbidden = False
-        with Path("files", "rbac-policy.yaml").open() as f:
-            for policy in codecs.load_all_yaml(f):
-                if policy.kind == "ClusterRoleBinding":
-                    for subject in policy.subjects:
-                        subject.namespace = self.model.name
+            self.unit.status = ops.MaintenanceStatus("Deploying CoreDNS")
+            self.unit.set_workload_version("")
+            for manifest in self.collector.manifests.values():
                 try:
-                    self.client.apply(policy, force=True)
-                except ApiError as err:
-                    self._stored.forbidden |= err.status.code == 403
-                    if not self._stored.forbidden:
-                        raise
+                    manifest.apply_manifests()
+                except ManifestClientError as e:
+                    failure_msg = " -> ".join(map(str, e.args))
+                    status.add(ops.WaitingStatus(failure_msg))
+                    logger.warning("Encountered retriable installation error: %s", e)
+                    raise status.ReconcilerError(failure_msg)
 
-    def _patch_statefulset(self):
-        if not self.unit.is_leader():
-            return
-        logger.info(f"Patching Default dnsPolicy for {self.meta.name} statefulset")
-        patch = {"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}}
-        self.client.patch(StatefulSet, name=self.meta.name, namespace=self.model.name, obj=patch)
+        self.stored.config_hash = config_hash
+
+    def _purge_all_manifests(self) -> None:
+        """Purge resources created by this charm."""
+        self.unit.status = ops.MaintenanceStatus("Removing Kubernetes resources")
+        for manifest in self.collector.manifests.values():
+            self._purge_manifest(manifest)
+        self.stored.config_hash = 0
+
+    @status.on_error(ops.WaitingStatus("Manifest purge failed."))
+    def _purge_manifest(self, manifest: Manifests) -> None:
+        """Purge resources created by this charm by manifest."""
+        manifest = cast(CoreDNSManifests, manifest)
+        manifest.purging = True
+        manifest.delete_manifests(ignore_unauthorized=True, ignore_not_found=True)
+        manifest.purging = False
+
+    def _destroying(self, event: ops.EventBase) -> bool:
+        """Check if the charm is being destroyed."""
+        if cast(bool, self.stored.destroying):
+            return True
+        if isinstance(event, (ops.StopEvent, ops.RemoveEvent)):
+            self.stored.destroying = True
+            return True
+        return False
 
 
 if __name__ == "__main__":
-    main(CoreDNSCharm)
+    ops.main(CoreDNSCharm)
