@@ -30,34 +30,12 @@ parts:
     source: upstream
     source-type: local
 
-# base: ubuntu@24.04
-# platforms:
-#   all:
-#     build-on: [amd64]
-#     build-for: [all]
-
-
 platforms:
   ubuntu@24.04:amd64:
   ubuntu@24.04:arm64:
   ubuntu@24.04:armhf:
   ubuntu@24.04:ppc64el:
   ubuntu@24.04:s390x:
-
-# bases:
-# - build-on:
-#   - name: "ubuntu"
-#     channel: "22.04"
-#     architectures: ["amd64"]
-#   run-on:
-#   - name: "ubuntu"
-#     channel: "22.04"
-#     architectures:
-#       - amd64
-#       - armhf
-#       - arm64
-#       - ppc64el
-#       - s390x
 
 config:
   options:
@@ -72,6 +50,13 @@ config:
       description: Memory limit for each CoreDNS pod.
       type: string
       default: 170Mi
+    coredns_namespace:
+      description: |-
+        An existing namespace to deploy CoreDNS into.
+
+        if {model} is specified, the current model's name will be used.
+      type: string
+      default: "kube-system"
 
     domain:
       description: The local domain for cluster DNS.

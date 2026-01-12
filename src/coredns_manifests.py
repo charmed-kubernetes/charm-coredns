@@ -5,31 +5,86 @@
 import hashlib
 import json
 import logging
-from typing import Dict, Optional, cast
+from typing import Dict, Optional, TypeVar, Type
 from string import Template
 
 from httpx import HTTPError
-from lightkube.resources.core_v1 import Service as ServiceRes
-from lightkube.models.core_v1 import ConfigMap, Service
+from lightkube.core.resource import NamespacedResource
 from lightkube.models.apps_v1 import Deployment
+from lightkube.models.core_v1 import ConfigMap, Service, ServiceAccount
+from lightkube.models.rbac_v1 import ClusterRole, ClusterRoleBinding
+from lightkube.resources.core_v1 import Service as Service_Res
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
+from ops.manifests.manipulations import Subtraction
 
 log = logging.getLogger(__file__)
-DEPLOYMENT_NAME = "coredns"
-SERVICE_NS = "kube-system"
+SERVICE_ACCOUNT_NAME = DEPLOYMENT_NAME = "coredns"
 SERVICE_NAME = "kube-dns"
 
+T = TypeVar("T")
 
-class UpdateConfigMap(Patch):
+
+def _model_formatter(config_ns, model_name: str) -> str:
+    """Format the namespace with the model name if applicable."""
+    return config_ns.format(model=model_name)
+
+
+def _matches(obj, kind: Type[T], name: str) -> Optional[T]:
+    """Check if the object matches the given kind and name."""
+    if isinstance(obj, kind) and obj.metadata and obj.metadata.name == name:
+        return obj
+    return None
+
+
+class AdjustNamespace(Patch):
+    """Adjust metadata namespace."""
+
+    def __call__(self, obj) -> None:
+        """Replace namespace if object supports it."""
+        ns = _model_formatter(
+            self.manifests.config["coredns_namespace"], self.manifests.model.name
+        )
+        if isinstance(obj, NamespacedResource) and obj.metadata:
+            log.debug(f"Adjusting namespace for {obj.kind}/{obj.metadata.name} to {ns}")
+            obj.metadata.namespace = ns
+        if isinstance(obj, ClusterRoleBinding) and obj.metadata:
+            log.debug(
+                f"Adjusting subjects namespace for {obj.kind}/{obj.metadata.name} to {ns}"
+            )
+            for subject in obj.subjects or []:
+                subject.namespace = ns
+
+
+class AdjustClusterRoleName(Patch):
+    """Adjust RoleBinding name to be unique per model."""
+
+    @property
+    def name(self) -> str:
+        """Generate a unique name for the ClusterRole based on the model."""
+        model = self.manifests.model
+        app = model.app.name
+        uuid = model.uuid[:8]
+        return f"juju:{app}-{uuid}:{model.app.name}"
+
+    def __call__(self, obj) -> None:
+        """Replace RoleBinding name."""
+        name = self.name
+        if isinstance(obj, ClusterRoleBinding) and obj.metadata:
+            obj.roleRef.name = name
+            obj.metadata.name = name
+        elif isinstance(obj, ClusterRole) and obj.metadata:
+            obj.metadata.name = name
+
+
+class AdjustConfigMap(Patch):
     """Update the ConfigMap object."""
 
     def __call__(self, obj):
-        """Update the ConfigMap object in the deployment."""
-        if not (obj.kind == "ConfigMap" and obj.metadata.name == DEPLOYMENT_NAME):
+        """Update the ConfigMap object in the manifests."""
+        if not _matches(obj, ConfigMap, DEPLOYMENT_NAME):
             return
-        obj = cast(ConfigMap, obj)
-        if obj.data:
-            obj.data["Corefile"] = self.corefile
+        assert obj.data
+        obj.data["Corefile"] = self.corefile
 
     @property
     def corefile(self) -> str:
@@ -38,39 +93,51 @@ class UpdateConfigMap(Patch):
         return corefile.safe_substitute(self.manifests.config)
 
 
-class UpdateDeployment(Patch):
+class AdjustDeployment(Patch):
     """Update the Deployment object."""
 
     def __call__(self, obj):
-        """Update the Deployment object in the deployment."""
-        if not (obj.kind == "Deployment" and obj.metadata.name == DEPLOYMENT_NAME):
+        """Update the Deployment object in the manifests."""
+        if not _matches(obj, Deployment, DEPLOYMENT_NAME):
             return
-        obj = cast(Deployment, obj)
-        if obj.spec is None or obj.spec.template.spec is None:
-            return
+        assert obj.spec and obj.spec.template.spec
         containers = obj.spec.template.spec.containers
         memory_limit = self.manifests.config.get("coredns_memory_limit", "170Mi")
         obj.spec.replicas = self.manifests.config.get("coredns_replicas", 1)
-        for container in containers:
-            if (
-                container.name == DEPLOYMENT_NAME
-                and container.resources
-                and container.resources.limits
-            ):
-                container.resources.limits["memory"] = memory_limit
+        obj.spec.template.spec.automountServiceAccountToken = True
+        assert len(containers) == 1
+        container = containers[0]
+        assert container.resources.limits
+        log.debug(
+            f"Setting memory limit for container {container.name} to {memory_limit}"
+        )
+        container.resources.limits["memory"] = memory_limit
 
 
-class UpdateService(Patch):
+class AdjustService(Patch):
     """Update the Service object."""
 
     def __call__(self, obj):
         """Update the Service object in the deployment."""
-        if not (obj.kind == "Service" and obj.metadata.name == SERVICE_NAME):
+        if not _matches(obj, Service, SERVICE_NAME):
             return
-        obj = cast(Service, obj)
-        if obj.spec is None:
-            return
+        assert obj.spec
         obj.spec.clusterIP = None
+
+
+class AdjustServiceAccount(Subtraction):
+    """Remove ServiceAccount from manifests."""
+
+    def __call__(self, obj) -> bool:
+        """Remove ServiceAccount from the manifests."""
+        if not _matches(obj, ServiceAccount, SERVICE_ACCOUNT_NAME):
+            return False
+        ns = _model_formatter(
+            self.manifests.config["coredns_namespace"], self.manifests.model.name
+        )
+        if ns == self.manifests.model.name:
+            log.debug("Removing duplicate service account provided by juju")
+        return ns == self.manifests.model.name
 
 
 class CoreDNSManifests(Manifests):
@@ -80,12 +147,14 @@ class CoreDNSManifests(Manifests):
         manipulations = [
             ManifestLabel(self),
             ConfigRegistry(self),
-            UpdateConfigMap(self),
-            UpdateDeployment(self),
-            UpdateService(self),
+            AdjustNamespace(self),
+            AdjustClusterRoleName(self),
+            AdjustConfigMap(self),
+            AdjustDeployment(self),
+            AdjustService(self),
+            AdjustServiceAccount(self),
         ]
         super().__init__("coredns", charm.model, "upstream/coredns", manipulations)
-        self.purging = False
         self.charm = charm
 
     @property
@@ -107,7 +176,7 @@ class CoreDNSManifests(Manifests):
 
     def evaluate(self) -> Optional[str]:
         """Determine if manifest_config can be applied to manifests."""
-        props = ["corefile"]
+        props = ["corefile", "coredns_namespace"]
         for prop in props:
             value = self.config.get(prop)
             if not value:
@@ -117,7 +186,8 @@ class CoreDNSManifests(Manifests):
     def get_service_address(self) -> str:
         """Get the ClusterIP address of the CoreDNS service."""
         try:
-            service = self.client.get(ServiceRes, SERVICE_NAME, namespace=SERVICE_NS)
+            ns = _model_formatter(self.config["coredns_namespace"], self.model.name)
+            service = self.client.get(Service_Res, SERVICE_NAME, namespace=ns)
             if service and service.spec and service.spec.clusterIP:
                 return service.spec.clusterIP
         except HTTPError as e:

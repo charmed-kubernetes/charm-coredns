@@ -6,12 +6,12 @@
 import logging
 
 import ops
-from ops.manifests import Collector, ManifestClientError, Manifests
+from ops.manifests import Collector, ManifestClientError, Manifests, ResourceAnalysis
 import charms.contextual_status as status
 from charms.reconciler import Reconciler
 
 from coredns_manifests import CoreDNSManifests
-from typing import cast
+from typing import cast, List
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,7 @@ class CoreDNSCharm(ops.CharmBase):
                 self._purge_all_manifests()
             return
         hash = self.evaluate_manifests()
+        self.prevent_collisions(event)
         self.install_manifests(config_hash=hash)
         self._update_status()
 
@@ -136,6 +137,29 @@ class CoreDNSCharm(ops.CharmBase):
                 raise status.ReconcilerError(evaluation)
             new_hash += manifest.hash()
         return new_hash
+
+    def prevent_collisions(self, event: ops.EventBase) -> None:
+        """Prevent manifest collisions."""
+        if self.unit.is_leader():
+            self.unit.status = ops.MaintenanceStatus("Detecting manifest collisions")
+            analyses: List[ResourceAnalysis] = self.collector.analyze_resources(
+                event, "", ""
+            )
+            count = sum(len(a.conflicting) for a in analyses)
+            if count > 0:
+                msg = f"{count} Kubernetes resource collision{'s'[: count ^ 1]} (action: list-resources)"
+                logger.error(msg)
+                for analysis in analyses:
+                    if analysis.conflicting:
+                        logger.error(
+                            " Collision count in '%s' is %d",
+                            analysis.manifest,
+                            len(analysis.conflicting),
+                        )
+                        for _ in sorted(map(str, analysis.conflicting)):
+                            logger.error("   %s", _)
+                status.add(ops.BlockedStatus(msg))
+                raise status.ReconcilerError(msg)
 
     def install_manifests(self, config_hash: int) -> None:
         if cast(int, self.stored.config_hash) == config_hash:

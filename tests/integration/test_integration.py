@@ -20,6 +20,9 @@ async def test_build_and_deploy(ops_test, coredns_model):
 
         await m.deploy(
             entity_url=charm.resolve(),
+            # Prevent conflicts when deploying on a cluster where coredns
+            # is already deployed into the kube-system namespace
+            config={"coredns_namespace": "{model}"},
             trust=True,
         )
 

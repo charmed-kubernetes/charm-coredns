@@ -95,7 +95,9 @@ async def coredns_model(ops_test: OpsTest, charmed_kubernetes):
     model_alias = "coredns-model"
     try:
         config = type.__call__(Configuration)
-        k8s_config.load_config(client_configuration=config, config_file=str(charmed_kubernetes.kubeconfig))
+        k8s_config.load_config(
+            client_configuration=config, config_file=str(charmed_kubernetes.kubeconfig)
+        )
         k8s_cloud = await ops_test.add_k8s(kubeconfig=config, skip_storage=False)
         k8s_model = await ops_test.track_model(
             model_alias, cloud_name=k8s_cloud, keep=ops_test.ModelKeep.NEVER
