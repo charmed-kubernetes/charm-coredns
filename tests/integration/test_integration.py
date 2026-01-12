@@ -1,9 +1,7 @@
 import logging
-import shlex
 from pathlib import Path
 
 import pytest
-import yaml
 
 log = logging.getLogger(__name__)
 

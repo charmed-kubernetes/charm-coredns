@@ -175,5 +175,5 @@ def coredns_ip(ops_test, coredns_model, k8s_client):
     _, k8s_alias = coredns_model
     client, _ = k8s_client
     with ops_test.model_context(k8s_alias):
-        coredns_service = client.get(Service, "coredns", namespace="kube-system")
+        coredns_service = client.get(Service, "coredns", namespace=ops_test.model_name)
     yield coredns_service.spec.clusterIP

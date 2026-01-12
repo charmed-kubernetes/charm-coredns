@@ -1,7 +1,7 @@
 import unittest.mock as mock
 
 import pytest
-from ops.pebble import ServiceStatus
+from lightkube import ApiError
 from ops.testing import Harness
 
 from charm import CoreDNSCharm
@@ -12,6 +12,17 @@ from charm import CoreDNSCharm
 def lk_client():
     with mock.patch("ops.manifests.manifest.Client", autospec=True) as mock_lightkube:
         yield mock_lightkube.return_value
+
+
+@pytest.fixture()
+def api_error_klass():
+    class TestApiError(ApiError):
+        status = mock.MagicMock()
+
+        def __init__(self):
+            pass
+
+    yield TestApiError
 
 
 @pytest.fixture()

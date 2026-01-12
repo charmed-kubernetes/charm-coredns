@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: validate-dns
+spec:
+  containers:
+    - name: busybox
+      image: rocks.canonical.com/cdk/busybox:1.36
+      imagePullPolicy: IfNotPresent
+      args: ['sleep', '3600']
+  restartPolicy: Always

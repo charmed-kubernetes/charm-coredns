@@ -40,7 +40,8 @@ class CoreDNSCharm(ops.CharmBase):
         # whether the charm is being destroyed
         self.stored.set_default(destroying=False)
 
-        self.collector = Collector(CoreDNSManifests(self))
+        self.manifest = CoreDNSManifests(self)
+        self.collector = Collector(self.manifest)
 
     def _list_versions(self, event: ops.ActionEvent) -> None:
         self.collector.list_versions(event)
@@ -68,13 +69,13 @@ class CoreDNSCharm(ops.CharmBase):
             self.stored.deployed = True
 
     def _update_status(self) -> None:
-        address = self._dns_address()
+        address = self.manifest.get_service_address()
         self._provide_kube_dns(address)
         if unready := self.collector.unready:
             status.add(ops.WaitingStatus(", ".join(unready)))
             raise status.ReconcilerError("Waiting for deployment")
-        elif not self._dns_address():
-            self.unit.status = ops.MaintenanceStatus("Waiting for DNS service address")
+        elif not address:
+            status.add(ops.WaitingStatus("Waiting for DNS service address"))
             raise status.ReconcilerError("No service address")
         else:
             self.unit.set_workload_version(self.collector.short_version)
@@ -90,27 +91,16 @@ class CoreDNSCharm(ops.CharmBase):
         except status.ReconcilerError:
             logger.exception("Can't update_status")
 
-    def _dns_address(self) -> str:
-        """Get the ClusterIP address of the CoreDNS service."""
-        for manifest in self.collector.manifests.values():
-            if not isinstance(manifest, CoreDNSManifests):
-                continue
-            return manifest.get_service_address()
-        return ""
-
     def _provide_kube_dns(self, cluster_address: str) -> None:
         """Provide DNS info to the dns-provider relation."""
         for rel in self.model.relations.get("dns-provider", []):
-            try:
-                rel.data[self.unit].update(
-                    **{
-                        "domain": self.model.config["domain"],
-                        "sdn-ip": str(cluster_address),
-                        "port": "53",
-                    }
-                )
-            except ops.model.ModelError as e:
-                logger.error(f"Failed to set dns-provider relation data: {e}")
+            rel.data[self.unit].update(
+                **{
+                    "domain": self.model.config["domain"],
+                    "sdn-ip": str(cluster_address),
+                    "port": "53",
+                }
+            )
 
     def reconcile(self, event: ops.EventBase) -> None:
         """Reconcile the charm state."""
@@ -119,6 +109,7 @@ class CoreDNSCharm(ops.CharmBase):
             logger.info("purge manifests if leader(%s) event(%s)", leader, event)
             if leader:
                 self._purge_all_manifests()
+            status.add(ops.BlockedStatus("Removing CoreDNS"))
             return
         hash = self.evaluate_manifests()
         self.prevent_collisions(event)
@@ -128,15 +119,10 @@ class CoreDNSCharm(ops.CharmBase):
     def evaluate_manifests(self) -> int:
         """Evaluate all manifests."""
         self.unit.status = ops.MaintenanceStatus("Evaluating CoreDNS")
-        new_hash = 0
-        for manifest in self.collector.manifests.values():
-            if not isinstance(manifest, CoreDNSManifests):
-                continue
-            if evaluation := manifest.evaluate():
-                status.add(ops.BlockedStatus(evaluation))
-                raise status.ReconcilerError(evaluation)
-            new_hash += manifest.hash()
-        return new_hash
+        if evaluation := self.manifest.evaluate():
+            status.add(ops.BlockedStatus(evaluation))
+            raise status.ReconcilerError(evaluation)
+        return self.manifest.hash()
 
     def prevent_collisions(self, event: ops.EventBase) -> None:
         """Prevent manifest collisions."""
@@ -189,10 +175,7 @@ class CoreDNSCharm(ops.CharmBase):
     @status.on_error(ops.WaitingStatus("Manifest purge failed."))
     def _purge_manifest(self, manifest: Manifests) -> None:
         """Purge resources created by this charm by manifest."""
-        manifest = cast(CoreDNSManifests, manifest)
-        manifest.purging = True
         manifest.delete_manifests(ignore_unauthorized=True, ignore_not_found=True)
-        manifest.purging = False
 
     def _destroying(self, event: ops.EventBase) -> bool:
         """Check if the charm is being destroyed."""

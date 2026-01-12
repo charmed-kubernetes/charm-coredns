@@ -18,6 +18,7 @@ from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
 from ops.manifests.manipulations import Subtraction
 
 log = logging.getLogger(__file__)
+CLUSTER_ROLE_NAME = CLUSTER_ROLE_BINDING_NAME = "system:coredns"
 SERVICE_ACCOUNT_NAME = DEPLOYMENT_NAME = "coredns"
 SERVICE_NAME = "kube-dns"
 
@@ -47,11 +48,11 @@ class AdjustNamespace(Patch):
         if isinstance(obj, NamespacedResource) and obj.metadata:
             log.debug(f"Adjusting namespace for {obj.kind}/{obj.metadata.name} to {ns}")
             obj.metadata.namespace = ns
-        if isinstance(obj, ClusterRoleBinding) and obj.metadata:
+        if crb := _matches(obj, ClusterRoleBinding, CLUSTER_ROLE_BINDING_NAME):
             log.debug(
                 f"Adjusting subjects namespace for {obj.kind}/{obj.metadata.name} to {ns}"
             )
-            for subject in obj.subjects or []:
+            for subject in crb.subjects or []:
                 subject.namespace = ns
 
 
@@ -62,18 +63,18 @@ class AdjustClusterRoleName(Patch):
     def name(self) -> str:
         """Generate a unique name for the ClusterRole based on the model."""
         model = self.manifests.model
-        app = model.app.name
+        app = model.name
         uuid = model.uuid[:8]
         return f"juju:{app}-{uuid}:{model.app.name}"
 
     def __call__(self, obj) -> None:
         """Replace RoleBinding name."""
         name = self.name
-        if isinstance(obj, ClusterRoleBinding) and obj.metadata:
-            obj.roleRef.name = name
-            obj.metadata.name = name
-        elif isinstance(obj, ClusterRole) and obj.metadata:
-            obj.metadata.name = name
+        if crb := _matches(obj, ClusterRoleBinding, CLUSTER_ROLE_BINDING_NAME):
+            crb.roleRef.name = name
+            crb.metadata.name = name
+        elif cr := _matches(obj, ClusterRole, CLUSTER_ROLE_NAME):
+            cr.metadata.name = name
 
 
 class AdjustConfigMap(Patch):
