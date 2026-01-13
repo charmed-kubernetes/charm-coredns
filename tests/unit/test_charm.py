@@ -17,9 +17,9 @@ def test_action_list_versions(harness: Harness):
     action_event = harness.run_action("list-versions")
     versions = action_event.results["coredns-versions"].splitlines()
     assert sorted(versions) == [
-        "v1.33.0",
-        "v1.34.0",
-        "v1.35.0",
+        "v1.12.0",
+        "v1.12.1",
+        "v1.13.1",
     ]
 
 

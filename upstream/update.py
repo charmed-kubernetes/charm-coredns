@@ -4,10 +4,10 @@
 """Update to a new upstream release."""
 
 import argparse
-import functools
 import json
 import logging
 import re
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -150,43 +150,55 @@ def sync_asset(image: str, registry: Registry):
     return SyncAsset(source=migrate_source(image), target=dest, type="image")
 
 
-@functools.lru_cache()
-def source_patches(source: str) -> dict:
-    """Load the patch file for a source."""
-    manifest = SOURCES[source]["manifest"]
-    patch = FILEDIR / source / "patches" / manifest
-    return yaml.safe_load(patch.open())
-
-
-def available_releases(
-    source: str, new_releases: Iterable[Release]
-) -> Generator[Release, None, None]:
-    """Filter out releases that are to be ignored."""
-    patcher = source_patches(source)
-    for release in new_releases:
-        if release.name in patcher["ignore-releases"]:
-            log.info(f"Ignoring Release {source}: {release.name}")
-            continue
-        yield release
-
 
 def main(source: str, registry: Registry, check: bool, debug: bool):
     """Main update logic."""
-    local_releases = gather_current(source)
-    latest, gh_releases = gather_releases(source)
-    new_releases = gh_releases - local_releases
-    for release in available_releases(source, new_releases):
-        local_releases.add(download(source, release))
+    latest, local_releases = gather_releases(source)
     unique_releases = list(dict.fromkeys(accumulate((sorted(local_releases)), dedupe)))
     all_images = set(image for release in unique_releases for image in images(source, release))
     mirror_image(all_images, registry, check, debug)
     return latest, all_images
 
 
+def _gather_repo_tags(tree_url: str) -> List:
+    """Retrieve semantically ordered release tags from GitHub, following pagination.
+
+    Yields:
+        Release tag strings sorted from newest to oldest.
+
+    Raises:
+        ValueError: If no tags are retrieved.
+
+    """
+    tag_names: List[str] = []
+
+    while tree_url:
+        resp = urllib.request.urlopen(tree_url, timeout=5)
+        page = json.loads(resp.read())
+        if not page and not tag_names:
+            raise ValueError("No k8s tags retrieved.")
+        tag_names.extend([tag["name"] for tag in page])
+
+        link = resp.headers.get("Link", "")
+        if not link:
+            break
+
+        # parse Link header and follow 'next' if present
+        next_parsed = {record for record in link.split(",") if 'rel="next"' in record}
+        if next_parsed:
+            first = next_parsed.pop()
+            tree_url = first.split(";")[0].strip().strip("<>")
+        else:
+            tree_url = ""
+            break
+
+    return tag_names
+
 def gather_releases(source: str) -> Tuple[str, Set[Release]]:
     """Fetch from github the release manifests by version."""
     context = dict(**SOURCES[source])
     version_parser = context["version_parser"]
+    releases = []
     if context.get("default_branch"):
         with urllib.request.urlopen(GH_REPO.format(**context)) as resp:
             context["branch"] = json.load(resp)["default_branch"]
@@ -212,25 +224,26 @@ def gather_releases(source: str) -> Tuple[str, Set[Release]]:
                 reverse=True,
             )
     elif context.get("release_tags"):
-        with urllib.request.urlopen(GH_TAGS.format(**context)) as resp:
-            releases = sorted(
-                [
-                    Release(
-                        item["name"],
-                        upstream=GH_RAW.format(branch=item["name"], rel="", **context),
-                    )
-                    for item in json.load(resp)
-                    if (
-                        VERSION_RE.match(item["name"])
-                        and not version_parser(item["name"][1:]).prerelease
-                        and version_parser(context["minimum"][1:])
-                        <= version_parser(item["name"][1:])
-                    )
-                ],
-                key=lambda r: version_parser(r.name[1:]),
-                reverse=True,
-            )
+        resp = _gather_repo_tags(GH_TAGS.format(**context))
+        releases = sorted(
+            [
+                Release(
+                    item,
+                    upstream=GH_RAW.format(branch=item, rel="", **context),
+                )
+                for item in resp
+                if (
+                    VERSION_RE.match(item)
+                    and not version_parser(item[1:]).prerelease
+                    and version_parser(context["minimum"][1:])
+                    <= version_parser(item[1:])
+                )
+            ],
+            key=lambda r: version_parser(r.name[1:]),
+            reverse=True,
+        )
 
+    releases = [download(source, release) for release in releases]
     return releases[0].name, set(releases)
 
 
@@ -243,31 +256,35 @@ def gather_current(source: str) -> Set[Release]:
     )
 
 
-def replace_images(release: Release, patcher: dict):
+def find_images(path: Path):
     """Replace images in a release."""
-    lines = release.path.read_text().splitlines(True)
-    with release.path.open("w") as fp:
-        for line in lines:
-            if m := IMG_RE.match(line):
-                head, image = m.groups()
-                for replacer in patcher["replace-images"]:
-                    if image.startswith(replacer["find"]):
-                        image = image.replace(replacer["find"], replacer["replace"])
-                        break
-                line = f"{head}{image}\n"
-            fp.write(line)
+    lines = path.read_text().splitlines(True)
+    with path.open() as fp:
+        return [m.groups()[-1] for img in lines if (m := IMG_RE.match(img))]
 
 
 def download(source: str, release: Release) -> Release:
     """Download the manifest files for a specific release."""
     log.info(f"Getting Release {source}: {release.name}")
-    dest = FILEDIR / source / "manifests" / release.name / release.drop_sed.name
+    # open a temporary file to download the manifest
+    with NamedTemporaryFile(mode="wb", delete=False) as tmpfile:
+        path, _ = urllib.request.urlretrieve(release.upstream, tmpfile.name)
+        images = find_images(Path(path))
+        image_tags = {img.split(":")[-1] for img in images}
+        r = Release(image_tags.pop(), Path(tmpfile.name), release.size)
+        dest = FILEDIR / source / "manifests" / r.name / release.drop_sed.name
+        dest.parent.mkdir(exist_ok=True)
+        shutil.move(r.path, dest)
+    return Release(r.name, dest, release.size)
+
+def copy(tmp: Path, manifest: str, release: Release) -> Release:
+    """Copy the manifest files for a specific release."""
+    log.info(f"Copying Release {manifest}: {release.name}")
+    dest = FILEDIR / manifest / "manifests" / release.name
     dest.parent.mkdir(exist_ok=True)
-    urllib.request.urlretrieve(release.upstream, dest)
-    r = Release(release.name, dest, release.size)
-    patcher = source_patches(source)
-    replace_images(r, patcher)
-    return r
+    src = tmp / manifest / "manifests" / release.name
+    shutil.copy(src, dest)
+    return Release(release.name, dest, release.size)
 
 
 def dedupe(this: Release, next: Release) -> Release:
@@ -288,18 +305,14 @@ def dedupe(this: Release, next: Release) -> Release:
 
 def images(source: str, component: Release) -> Generator[str, None, None]:
     """Yield all images from each release."""
-    patcher = source_patches(source)
     with Path(component.path).open() as fp:
         for line in fp:
             if m := IMG_RE.match(line):
                 image = m.groups()[1]
-                if any(image.startswith(i) for i in patcher["ignore-images"]):
-                    log.info(f"Ignoring Image {source}: {image}")
-                    continue
                 yield image
 
 
-def mirror_image(images: List[str], registry: Registry, check: bool, debug: bool):
+def mirror_image(images: Iterable[str], registry: Registry, check: bool, debug: bool):
     """Synchronize all source images to target registry, only pushing changed layers."""
     sync_config = SyncConfig(
         version=1,

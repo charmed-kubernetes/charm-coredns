@@ -72,7 +72,7 @@ def module_name(request):
 
 
 @pytest_asyncio.fixture(scope="module")
-async def k8s_client(charmed_kubernetes, request, module_name):
+async def k8s_client(charmed_kubernetes, module_name):
     rand_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
     namespace = f"{module_name}-{rand_str}"
     config = KubeConfig.from_file(charmed_kubernetes.kubeconfig)
@@ -152,7 +152,7 @@ async def related(ops_test, coredns_model):
 
 
 @pytest.fixture(scope="class")
-def validate_dns_pod(ops_test, k8s_client):
+def validate_dns_pod(k8s_client):
     client, namespace = k8s_client
     log.info("Creating pod for dns validation ...")
     spec_file = Path(__file__).parent / "data" / "validate-dns-spec.yaml"
@@ -175,5 +175,5 @@ def coredns_ip(ops_test, coredns_model, k8s_client):
     _, k8s_alias = coredns_model
     client, _ = k8s_client
     with ops_test.model_context(k8s_alias):
-        coredns_service = client.get(Service, "coredns", namespace=ops_test.model_name)
+        coredns_service = client.get(Service, "kube-dns", namespace=ops_test.model_name)
     yield coredns_service.spec.clusterIP

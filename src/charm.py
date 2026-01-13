@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Dispatch logic for the vsphere CPI operator charm."""
+"""Dispatch logic for the CoreDNS operator charm."""
 
 import logging
 
@@ -94,13 +94,16 @@ class CoreDNSCharm(ops.CharmBase):
     def _provide_kube_dns(self, cluster_address: str) -> None:
         """Provide DNS info to the dns-provider relation."""
         for rel in self.model.relations.get("dns-provider", []):
-            rel.data[self.unit].update(
-                **{
-                    "domain": self.model.config["domain"],
-                    "sdn-ip": str(cluster_address),
-                    "port": "53",
-                }
-            )
+            try:
+                rel.data[self.unit].update(
+                    **{
+                        "domain": self.model.config["domain"],
+                        "sdn-ip": str(cluster_address),
+                        "port": "53",
+                    }
+                )
+            except ops.ModelError as e:
+                logger.error("Failed to set dns-provider relation data: %s", e)
 
     def reconcile(self, event: ops.EventBase) -> None:
         """Reconcile the charm state."""
