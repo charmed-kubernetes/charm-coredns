@@ -4,3 +4,6 @@ juju-crashdump-*
 __pycache__/
 .coverage
 .vscode/
+tests/
+requirements-test.txt
+tox.ini

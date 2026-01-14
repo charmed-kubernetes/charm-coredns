@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import shlex
 import string
@@ -63,6 +64,7 @@ async def charmed_kubernetes(ops_test):
             log.error(f"stderr:\n{stderr.strip()}")
             pytest.fail("Failed to copy kubeconfig from kubernetes-control-plane")
         assert Path(kubeconfig_path).stat().st_size, "kubeconfig file is 0 bytes"
+    os.environ["KUBECONFIG"] = str(kubeconfig_path)
     yield SimpleNamespace(kubeconfig=kubeconfig_path, model=model)
 
 

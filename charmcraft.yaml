@@ -20,15 +20,19 @@ type: charm
 parts:
   charm:
     plugin: charm
-    override-build: |
-      craftctl default
-      git -C $CRAFT_PROJECT_DIR rev-parse --short HEAD > version
+    source: .
     build-packages:
     - git
+    override-prime: |
+      git -C $CRAFT_PROJECT_DIR rev-parse --short HEAD > $CRAFT_PRIME/version
+      craftctl default
   manifests:
     plugin: dump
-    source: upstream
-    source-type: local
+    source: ./upstream
+    organize:
+      coredns: upstream/coredns
+    stage:
+    - -update.py
 
 platforms:
   ubuntu@24.04:amd64:
