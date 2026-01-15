@@ -5,8 +5,8 @@
 import hashlib
 import json
 import logging
-from typing import Dict, Optional, TypeVar, Type
 from string import Template
+from typing import Dict, Optional, Type, TypeVar
 
 from httpx import HTTPError
 from lightkube.core.resource import NamespacedResource
@@ -171,9 +171,9 @@ class CoreDNSManifests(Manifests):
     def hash(self) -> int:
         """Calculate a hash of the current configuration."""
         json_str = json.dumps(self.config, sort_keys=True)
-        hash = hashlib.sha256()
-        hash.update(json_str.encode())
-        return int(hash.hexdigest(), 16)
+        hasher = hashlib.sha256()
+        hasher.update(json_str.encode())
+        return int(hasher.hexdigest(), 16)
 
     def evaluate(self) -> Optional[str]:
         """Determine if manifest_config can be applied to manifests."""

@@ -1,11 +1,13 @@
-from coredns_manifests import CoreDNSManifests
-
 import pytest
+
+from coredns_manifests import CoreDNSManifests
 
 
 @pytest.fixture
 def manifest(harness):
-    yield CoreDNSManifests(harness)
+    harness.disable_hooks()
+    harness.begin()
+    yield CoreDNSManifests(harness.charm)
 
 
 def test_steady_hash(manifest):

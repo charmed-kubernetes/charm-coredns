@@ -9,13 +9,12 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from juju.tag import untag
+from kubernetes import config as k8s_config
+from kubernetes.client import Configuration
 from lightkube import Client, KubeConfig, codecs
 from lightkube.models.meta_v1 import ObjectMeta
 from lightkube.resources.core_v1 import Namespace, Pod, Service
-from kubernetes import config as k8s_config
-from kubernetes.client import Configuration
 from pytest_operator.plugin import OpsTest
-
 
 log = logging.getLogger(__name__)
 

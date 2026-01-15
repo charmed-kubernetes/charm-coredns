@@ -163,7 +163,7 @@ def main(source: str, registry: Registry, check: bool, debug: bool):
 def _gather_repo_tags(tree_url: str) -> List:
     """Retrieve semantically ordered release tags from GitHub, following pagination.
 
-    Yields:
+    Returns:
         Release tag strings sorted from newest to oldest.
 
     Raises:
@@ -189,7 +189,6 @@ def _gather_repo_tags(tree_url: str) -> List:
             first = next_parsed.pop()
             tree_url = first.split(";")[0].strip().strip("<>")
         else:
-            tree_url = ""
             break
 
     return tag_names
@@ -259,8 +258,7 @@ def gather_current(source: str) -> Set[Release]:
 def find_images(path: Path):
     """Replace images in a release."""
     lines = path.read_text().splitlines(True)
-    with path.open() as fp:
-        return [m.groups()[-1] for img in lines if (m := IMG_RE.match(img))]
+    return [m.groups()[-1] for img in lines if (m := IMG_RE.match(img))]
 
 
 def download(source: str, release: Release) -> Release:

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-# Copyright 2022 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 """Dispatch logic for the CoreDNS operator charm."""
 
 import logging
+from typing import List, cast
 
-import ops
-from ops.manifests import Collector, ManifestClientError, Manifests, ResourceAnalysis
 import charms.contextual_status as status
+import ops
 from charms.reconciler import Reconciler
+from ops.manifests import Collector, ManifestClientError, Manifests, ResourceAnalysis
 
 from coredns_manifests import CoreDNSManifests
-from typing import cast, List
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,6 @@ class CoreDNSCharm(ops.CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
 
-        # Relation Validator and datastore
         self.reconciler = Reconciler(self, self.reconcile)
 
         self.framework.observe(self.on.list_versions_action, self._list_versions)
@@ -114,9 +113,9 @@ class CoreDNSCharm(ops.CharmBase):
                 self._purge_all_manifests()
             status.add(ops.BlockedStatus("Removing CoreDNS"))
             return
-        hash = self.evaluate_manifests()
+        hasher = self.evaluate_manifests()
         self.prevent_collisions(event)
-        self.install_manifests(config_hash=hash)
+        self.install_manifests(config_hash=hasher)
         self._update_status()
 
     def evaluate_manifests(self) -> int:
@@ -136,7 +135,7 @@ class CoreDNSCharm(ops.CharmBase):
             )
             count = sum(len(a.conflicting) for a in analyses)
             if count > 0:
-                msg = f"{count} Kubernetes resource collision{'s'[: count ^ 1]} (action: list-resources)"
+                msg = f"{count} Kubernetes resource collision{'s' if count != 1 else ''} (action: list-resources)"
                 logger.error(msg)
                 for analysis in analyses:
                     if analysis.conflicting:
@@ -151,6 +150,7 @@ class CoreDNSCharm(ops.CharmBase):
                 raise status.ReconcilerError(msg)
 
     def install_manifests(self, config_hash: int) -> None:
+        """Install or update manifests as needed."""
         if cast(int, self.stored.config_hash) == config_hash:
             logger.info(f"No config changes detected. config_hash={config_hash}")
             return

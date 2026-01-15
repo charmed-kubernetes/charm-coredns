@@ -1,15 +1,14 @@
 import unittest.mock as mock
 
-from lightkube.models.meta_v1 import ObjectMeta
+import pytest
 from lightkube.models.core_v1 import Service
-from ops.testing import Harness
+from lightkube.models.meta_v1 import ObjectMeta
 from ops.manifests import (
     HashableResource,
     ManifestClientError,
     ResourceAnalysis,
 )
-
-import pytest
+from ops.testing import Harness
 
 
 def test_action_list_versions(harness: Harness):
@@ -137,13 +136,13 @@ def test_update_status_ready(update_status_charm):
 def test_reconcile_through_evaluate_manifests(harness):
     harness.begin()
     harness.enable_hooks()
-    FAILURE = "Failed to evaluate manifests"
+    failure = "Failed to evaluate manifests"
     with mock.patch.object(harness.charm.manifest, "evaluate") as evaluation:
-        evaluation.return_value = FAILURE
+        evaluation.return_value = failure
         harness.set_leader(True)
         evaluation.assert_called_once_with()
     assert harness.charm.unit.status.name == "blocked"
-    assert harness.charm.unit.status.message == FAILURE
+    assert harness.charm.unit.status.message == failure
 
 
 def test_reconcile_through_prevent_collisions(harness):

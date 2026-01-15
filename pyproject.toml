@@ -10,13 +10,12 @@ minversion = "6.0"
 log_cli_level = "INFO"
 
 # Formatting tools configuration
-[tool.black]
-line-length = 99
-target-version = ["py38"]
-
-# Linting tools configuration
 [tool.lint]
 line-length = 99
+target-version = ["py310"]
+
+# Linting tools configuration
+[tool.ruff.lint]
 select = ["E", "W", "F", "C", "N", "D", "I001"]
 extend-ignore = [
     "D203",
@@ -32,10 +31,10 @@ extend-ignore = [
     "D413",
 ]
 ignore = ["E501", "D107"]
-extend-exclude = ["__pycache__", "*.egg_info"]
+exclude = ["__pycache__", "*.egg_info"]
 per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
 
-[tool.lint.mccabe]
+[tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.codespell]
