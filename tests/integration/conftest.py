@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from juju.application import Application
 from juju.tag import untag
 from kubernetes import config as k8s_config
 from kubernetes.client import Configuration
@@ -17,6 +18,7 @@ from lightkube.resources.core_v1 import Namespace, Pod, Service
 from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
+KCP_CONFIG_DNS = "dns-provider"
 
 
 def pytest_addoption(parser):
@@ -109,14 +111,30 @@ async def coredns_model(ops_test: OpsTest, charmed_kubernetes):
 
 
 @pytest_asyncio.fixture(scope="class")
-async def related(ops_test, coredns_model):
-    coredns_model_obj, k8s_alias = coredns_model
-    app_name = "coredns"
+async def kcp_without_coredns(ops_test):
+    """Disable the native coredns deployment in kubernetes-control-plane."""
     k8s_cp = ops_test.model.applications["kubernetes-control-plane"]
+    log.info("Disabling native CoreDNS deployment in kubernetes-control-plane")
+    current = (await k8s_cp.get_config())[KCP_CONFIG_DNS]
+
+    try:
+        await k8s_cp.set_config({KCP_CONFIG_DNS: "none"})
+        await ops_test.model.wait_for_idle(status="active")
+
+        yield k8s_cp
+    finally:
+        log.info("Restoring native CoreDNS deployment in kubernetes-control-plane")
+        await k8s_cp.set_config({KCP_CONFIG_DNS: current})
+        await ops_test.model.wait_for_idle(status="active")
+
+
+@pytest_asyncio.fixture(scope="class")
+async def related(ops_test, kcp_without_coredns: Application, coredns_model):
+    coredns_model_obj, k8s_alias = coredns_model
+    kcp = kcp_without_coredns
+    app_name = "coredns"
     machine_model_name = ops_test.model_name
     model_owner = untag("user-", coredns_model_obj.info.owner_tag)
-    log.info("Configure dns-provider to none")
-    await k8s_cp.set_config({"dns-provider": "none"})
 
     with ops_test.model_context(k8s_alias) as m:
         offer, saas = None, None
@@ -130,7 +148,7 @@ async def related(ops_test, coredns_model):
         f"{model_owner}/{coredns_model_name}.{app_name}"
     )
     log.info("Relating ...")
-    await ops_test.model.add_relation(k8s_cp.name, f"{app_name}:dns-provider")
+    await ops_test.model.add_relation(kcp.name, f"{app_name}:dns-provider")
     with ops_test.model_context(k8s_alias) as coredns_model:
         await coredns_model.wait_for_idle(status="active")
     await ops_test.model.wait_for_idle(status="active")
