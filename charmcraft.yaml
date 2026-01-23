@@ -150,3 +150,17 @@ actions:
 provides:
   dns-provider:
     interface: kube-dns
+
+# -------------------------------------------------------------------------
+# Workaround for Juju bug 21648 - until Juju supports removing
+# container-image resources from a charm, we have to define this resource
+# https://github.com/juju/juju/issues/21648
+containers:
+  coredns:
+    resource: coredns-image
+
+resources:
+  coredns-image:
+    type: oci-image
+    description: Workload container image for CoreDNS (no longer used)
+    upstream-source: google/pause:latest

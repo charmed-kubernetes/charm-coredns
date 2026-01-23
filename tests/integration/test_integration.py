@@ -1,31 +1,50 @@
 import logging
 from pathlib import Path
+from typing import Dict
 
+import juju.utils
 import pytest
+from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
+TESTS_DIR = Path(__file__).parent.parent.parent
+
+
+def _charm_resources(metadata) -> Dict[str, str]:
+    """Return a dict of resources defined in charmcraft.yaml."""
+    resources = metadata.get("resources", {})
+    resource_dict = {}
+    for name, value in resources.items():
+        image_name = value.get("upstream-source", "")
+        if not image_name:
+            continue
+        resource_dict[name] = image_name
+    return resource_dict
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test, coredns_model):
+async def test_build_and_deploy(ops_test: OpsTest, coredns_model):
     _, k8s_alias = coredns_model
 
-    with ops_test.model_context(k8s_alias) as m:
-        charm = next(Path(".").glob("coredns*.charm"), None)
-        if not charm:
-            log.info("Building Charm...")
-            charm = await ops_test.build_charm(".")
+    charm = next(Path(".").glob("coredns*.charm"), None)
+    if not charm:
+        log.info("Building Charm...")
+        charm = await ops_test.build_charm(".")
 
-        await m.deploy(
+    metadata = juju.utils.get_local_charm_metadata(charm)
+    resources = _charm_resources(metadata)
+    with ops_test.model_context(k8s_alias) as model:
+        await model.deploy(
             entity_url=charm.resolve(),
             # Prevent conflicts when deploying on a cluster where coredns
             # is already deployed into the kube-system namespace
             config={"coredns_namespace": "{model}"},
+            resources=resources,
             trust=True,
         )
 
-        await m.block_until(lambda: "coredns" in m.applications, timeout=60)
-        await m.wait_for_idle(status="active")
+    await model.block_until(lambda: "coredns" in model.applications, timeout=60)
+    await model.wait_for_idle(status="active")
 
 
 @pytest.mark.usefixtures("related", "validate_dns_pod")
