@@ -33,7 +33,7 @@ class CoreDNSCharm(ops.CharmBase):
         self.framework.observe(self.on.update_status, self._on_update_status)
 
         # hashed value of the provider config once valid
-        self.stored.set_default(config_hash=0)
+        self.stored.set_default(config_hash="")
         # whether the manifests are deployed
         self.stored.set_default(deployed=False)
         # whether the charm is being destroyed
@@ -118,7 +118,7 @@ class CoreDNSCharm(ops.CharmBase):
         self.install_manifests(config_hash=hasher)
         self._update_status()
 
-    def evaluate_manifests(self) -> int:
+    def evaluate_manifests(self):
         """Evaluate all manifests."""
         self.unit.status = ops.MaintenanceStatus("Evaluating CoreDNS")
         if evaluation := self.manifest.evaluate():
@@ -149,10 +149,10 @@ class CoreDNSCharm(ops.CharmBase):
                 status.add(ops.BlockedStatus(msg))
                 raise status.ReconcilerError(msg)
 
-    def install_manifests(self, config_hash: int) -> None:
+    def install_manifests(self, config_hash: str) -> None:
         """Install or update manifests as needed."""
-        if cast(int, self.stored.config_hash) == config_hash:
-            logger.info(f"No config changes detected. config_hash={config_hash}")
+        if cast(str, self.stored.config_hash) == config_hash:
+            logger.info("No config changes detected. config_hash=%.8s...", config_hash)
             return
         if self.unit.is_leader():
             self.unit.status = ops.MaintenanceStatus("Deploying CoreDNS")

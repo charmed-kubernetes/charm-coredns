@@ -168,12 +168,12 @@ class CoreDNSManifests(Manifests):
         config["release"] = config.pop("coredns_release", None)
         return config
 
-    def hash(self) -> int:
+    def hash(self) -> str:
         """Calculate a hash of the current configuration."""
         json_str = json.dumps(self.config, sort_keys=True)
         hasher = hashlib.sha256()
         hasher.update(json_str.encode())
-        return int(hasher.hexdigest(), 16)
+        return hasher.hexdigest()
 
     def evaluate(self) -> Optional[str]:
         """Determine if manifest_config can be applied to manifests."""
