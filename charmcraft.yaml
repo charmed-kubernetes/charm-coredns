@@ -1,53 +1,166 @@
 # Architectures based on supported arch's in upstream
 # https://github.com/coredns/coredns/blob/ddee42c974d89d9beb4ebf7b82019624fbf0c456/Makefile.docker#L35
+
+name: coredns
+title: CoreDNS
+summary: CoreDNS charm for Kubernetes DNS resolution
+description: |
+  CoreDNS provides DNS resolution for Kubernetes.
+links:
+  contact: https://launchpad.net/~containers
+  issues:
+  - https://bugs.launchpad.net/charm-coredns/+bugs
+  source:
+  - https://github.com/charmed-kubernetes/charm-coredns/
+  documentation: https://discourse.charmhub.io/t/coredns-docs-index/6322
+assumes:
+  - k8s-api
+
 type: charm
-bases:
-  - build-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures: ["amd64"]
-    run-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures:
-        - amd64
-  - build-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures: ["armhf"]
-    run-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures:
-        - armhf
-  - build-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures: ["arm64"]
-    run-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures:
-        - arm64
-  - build-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures: ["ppc64el"]
-    run-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures:
-        - ppc64el
-  - build-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures: ["s390x"]
-    run-on:
-    - name: "ubuntu"
-      channel: "22.04"
-      architectures:
-        - s390x
 parts:
   charm:
-    prime:
-      - ./files/*
+    plugin: charm
+    source: .
+    build-packages:
+    - git
+    override-prime: |
+      git -C $CRAFT_PROJECT_DIR rev-parse --short HEAD > $CRAFT_PRIME/version
+      craftctl default
+  manifests:
+    plugin: dump
+    source: ./upstream
+    organize:
+      coredns: upstream/coredns
+    stage:
+    - -update.py
+
+platforms:
+  ubuntu@22.04:amd64:
+  ubuntu@22.04:arm64:
+  ubuntu@22.04:armhf:
+  ubuntu@22.04:ppc64el:
+  ubuntu@22.04:s390x:
+
+config:
+  options:
+    coredns_release:
+      description: The CoreDNS release to deploy.
+      type: string
+    coredns_replicas:
+      description: Number of CoreDNS replicas to deploy.
+      type: int
+      default: 1
+    coredns_memory_limit:
+      description: Memory limit for each CoreDNS pod.
+      type: string
+      default: 170Mi
+    coredns_namespace:
+      description: |-
+        An existing namespace to deploy CoreDNS into.
+
+        if {model} is specified, the current model's name will be used.
+      type: string
+      default: "kube-system"
+
+    domain:
+      description: The local domain for cluster DNS.
+      type: string
+      default: cluster.local
+    forward:
+      description: Where to forward non-cluster addresses.
+      type: string
+      default: /etc/resolv.conf
+    extra_servers:
+      description: Any additional servers to add to the Corefile.
+      type: string
+      default: ''
+    corefile:
+      description: >-
+        Configuration file to use for CoreDNS. This is interpreted as a Python
+        string. Template which will be given the `domain` and `forward` configs as
+        its context.
+      type: string
+      default: |
+        .:53 {
+            errors
+            health {
+              lameduck 5s
+            }
+            ready
+            kubernetes ${domain} in-addr.arpa ip6.arpa {
+              fallthrough in-addr.arpa ip6.arpa
+              pods insecure
+            }
+            prometheus :9153
+            forward . ${forward}
+            cache 30
+            loop
+            reload
+            loadbalance
+        }
+        ${extra_servers}
+
+actions:
+  list-versions:
+    description: List versions supported by this charm
+  list-resources:
+    description: List Resources of configured version
+    params:
+      manifest:
+        type: string
+        default: ""
+        description: |
+          Filter list based on "coredns" manifests.
+      resources:
+        type: string
+        default: ""
+        description: |
+          Space separated list of kubernetes resource types to filter list result
+  scrub-resources:
+    description: Remove deployments other than the current one
+    params:
+      manifest:
+        type: string
+        default: ""
+        description: |
+          Filter list based on "coredns" manifests.
+      resources:
+        type: string
+        default: ""
+        description: |
+          Space separated list of kubernetes resource types to filter scrubbing
+  sync-resources:
+    description: |
+      Add kubernetes resources which should be created by this charm which aren't
+      present within the cluster.
+    params:
+      manifest:
+        type: string
+        default: ""
+        description: |
+          Filter list based on "coredns" manifests.
+      resources:
+        type: string
+        default: ""
+        description: |
+          Space separated list of kubernetes resource types
+          to use a filter during the sync. This helps limit
+          which missing resources are applied.
+
+provides:
+  dns-provider:
+    interface: kube-dns
+
+# -------------------------------------------------------------------------
+# Workaround for Juju bug 21648 - until Juju supports removing
+# container-image resources from a charm, we have to define this resource
+# https://github.com/juju/juju/issues/21648
+containers:
+  coredns:
+    resource: coredns-image
+
+resources:
+  coredns-image:
+    type: oci-image
+    description: Workload container image for CoreDNS (no longer used)
+    upstream-source: google/pause:latest

@@ -6,15 +6,19 @@ import string
 from pathlib import Path
 from types import SimpleNamespace
 
-import juju.utils
 import pytest
-import yaml
+import pytest_asyncio
+from juju.application import Application
 from juju.tag import untag
+from kubernetes import config as k8s_config
+from kubernetes.client import Configuration
 from lightkube import Client, KubeConfig, codecs
 from lightkube.models.meta_v1 import ObjectMeta
 from lightkube.resources.core_v1 import Namespace, Pod, Service
+from pytest_operator.plugin import OpsTest
 
 log = logging.getLogger(__name__)
+KCP_CONFIG_DNS = "dns-provider"
 
 
 def pytest_addoption(parser):
@@ -25,7 +29,7 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module")
 async def charmed_kubernetes(ops_test):
     with ops_test.model_context("main") as model:
         deploy, control_plane_app = True, "kubernetes-control-plane"
@@ -37,14 +41,13 @@ async def charmed_kubernetes(ops_test):
                 if "kubernetes-control-plane" in app.charm_url
             ]
             if not control_plane_apps:
-                pytest.fail(f"Model {current_model} doesn't contain {control_plane_app} charm")
+                pytest.fail(
+                    f"Model {current_model} doesn't contain {control_plane_app} charm"
+                )
             deploy, control_plane_app = False, control_plane_apps[0]
 
         if deploy:
-            cmd = (
-                f"juju deploy -m {ops_test.model_full_name} "
-                "kubernetes-core --channel=latest/edge"
-            )
+            cmd = f"juju deploy -m {ops_test.model_full_name} kubernetes-core --channel=latest/edge"
             await ops_test.run(*shlex.split(cmd), check=True)
             # await model.deploy("kubernetes-core", channel="latest/edge")
 
@@ -62,6 +65,7 @@ async def charmed_kubernetes(ops_test):
             log.error(f"stderr:\n{stderr.strip()}")
             pytest.fail("Failed to copy kubeconfig from kubernetes-control-plane")
         assert Path(kubeconfig_path).stat().st_size, "kubeconfig file is 0 bytes"
+    os.environ["KUBECONFIG"] = str(kubeconfig_path)
     yield SimpleNamespace(kubeconfig=kubeconfig_path, model=model)
 
 
@@ -70,44 +74,8 @@ def module_name(request):
     return request.module.__name__.replace("_", "-")
 
 
-@pytest.fixture(scope="module")
-async def k8s_cloud(charmed_kubernetes, ops_test, request, module_name):
-    """Use an existing k8s-cloud or create a k8s-cloud for deploying a new k8s model into."""
-    cloud_name = request.config.option.k8s_cloud or f"{module_name}-k8s-cloud"
-    controller = await ops_test.model.get_controller()
-    current_clouds = await controller.clouds()
-    if f"cloud-{cloud_name}" in current_clouds.clouds:
-        yield cloud_name
-        return
-
-    with ops_test.model_context("main"):
-        log.info(f"Adding cloud '{cloud_name}'...")
-        os.environ["KUBECONFIG"] = str(charmed_kubernetes.kubeconfig)
-        await ops_test.juju(
-            "add-k8s",
-            cloud_name,
-            "--skip-storage",
-            f"--controller={ops_test.controller_name}",
-            "--client",
-            check=True,
-            fail_msg=f"Failed to add-k8s {cloud_name}",
-        )
-    yield cloud_name
-
-    with ops_test.model_context("main"):
-        log.info(f"Removing cloud '{cloud_name}'...")
-        await ops_test.juju(
-            "remove-cloud",
-            cloud_name,
-            "--controller",
-            ops_test.controller_name,
-            "--client",
-            check=True,
-        )
-
-
-@pytest.fixture(scope="module")
-async def k8s_client(charmed_kubernetes, request, module_name):
+@pytest_asyncio.fixture(scope="module")
+async def k8s_client(charmed_kubernetes, module_name):
     rand_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
     namespace = f"{module_name}-{rand_str}"
     config = KubeConfig.from_file(charmed_kubernetes.kubeconfig)
@@ -124,46 +92,49 @@ async def k8s_client(charmed_kubernetes, request, module_name):
     client.delete(Namespace, namespace)
 
 
-@pytest.fixture(scope="module")
-async def coredns_model(k8s_cloud, ops_test):
+@pytest_asyncio.fixture(scope="module")
+async def coredns_model(ops_test: OpsTest, charmed_kubernetes):
+    """Create a Juju model into which CoreDNS can be deployed."""
     model_alias = "coredns-model"
-    log.info("Creating CoreDNS model ...")
-    model = await ops_test.track_model(
-        model_alias, cloud_name=k8s_cloud, credential_name=k8s_cloud
-    )
-    model_uuid = model.info.uuid
-    yield model, model_alias
-
-    if model.applications.get("coredns"):
-        await model.remove_application("coredns", force=True)
-
-    timeout = 5 * 60
-    await ops_test.forget_model(model_alias, timeout=timeout, allow_failure=False)
-
-    async def model_removed():
-        _, stdout, stderr = await ops_test.juju("models", "--format", "yaml")
-        if _ != 0:
-            return False
-        model_list = yaml.safe_load(stdout)["models"]
-        which = [m for m in model_list if m["model-uuid"] == model_uuid]
-        return len(which) == 0
-
-    log.info("Removing CoreDNS model")
-    await juju.utils.block_until_with_coroutine(model_removed, timeout=timeout)
-    # Update client's model cache
-    await ops_test.juju("models")
-    log.info("CoreDNS model removed")
+    try:
+        config = type.__call__(Configuration)
+        k8s_config.load_config(
+            client_configuration=config, config_file=str(charmed_kubernetes.kubeconfig)
+        )
+        k8s_cloud = await ops_test.add_k8s(kubeconfig=config, skip_storage=False)
+        k8s_model = await ops_test.track_model(
+            model_alias, cloud_name=k8s_cloud, keep=ops_test.ModelKeep.NEVER
+        )
+        yield k8s_model, model_alias
+    finally:
+        await ops_test.forget_model(model_alias, timeout=10 * 60, allow_failure=True)
 
 
-@pytest.fixture(scope="class")
-async def related(ops_test, coredns_model):
-    coredns_model_obj, k8s_alias = coredns_model
-    app_name = "coredns"
+@pytest_asyncio.fixture(scope="class")
+async def kcp_without_coredns(ops_test):
+    """Disable the native coredns deployment in kubernetes-control-plane."""
     k8s_cp = ops_test.model.applications["kubernetes-control-plane"]
+    log.info("Disabling native CoreDNS deployment in kubernetes-control-plane")
+    current = (await k8s_cp.get_config())[KCP_CONFIG_DNS]
+
+    try:
+        await k8s_cp.set_config({KCP_CONFIG_DNS: "none"})
+        await ops_test.model.wait_for_idle(status="active")
+
+        yield k8s_cp
+    finally:
+        log.info("Restoring native CoreDNS deployment in kubernetes-control-plane")
+        await k8s_cp.set_config({KCP_CONFIG_DNS: current})
+        await ops_test.model.wait_for_idle(status="active")
+
+
+@pytest_asyncio.fixture(scope="class")
+async def related(ops_test, kcp_without_coredns: Application, coredns_model):
+    coredns_model_obj, k8s_alias = coredns_model
+    kcp = kcp_without_coredns
+    app_name = "coredns"
     machine_model_name = ops_test.model_name
     model_owner = untag("user-", coredns_model_obj.info.owner_tag)
-    log.info("Configure dns-provider to none")
-    await k8s_cp.set_config({"dns-provider": "none"})
 
     with ops_test.model_context(k8s_alias) as m:
         offer, saas = None, None
@@ -173,9 +144,11 @@ async def related(ops_test, coredns_model):
 
     log.info("Consuming CMR offer")
     log.info(f"{machine_model_name} consuming CMR offer from {coredns_model_name}")
-    saas = await ops_test.model.consume(f"{model_owner}/{coredns_model_name}.{app_name}")
+    saas = await ops_test.model.consume(
+        f"{model_owner}/{coredns_model_name}.{app_name}"
+    )
     log.info("Relating ...")
-    await ops_test.model.add_relation(k8s_cp.name, f"{app_name}:dns-provider")
+    await ops_test.model.add_relation(kcp.name, f"{app_name}:dns-provider")
     with ops_test.model_context(k8s_alias) as coredns_model:
         await coredns_model.wait_for_idle(status="active")
     await ops_test.model.wait_for_idle(status="active")
@@ -198,7 +171,7 @@ async def related(ops_test, coredns_model):
 
 
 @pytest.fixture(scope="class")
-def validate_dns_pod(ops_test, k8s_client):
+def validate_dns_pod(k8s_client):
     client, namespace = k8s_client
     log.info("Creating pod for dns validation ...")
     spec_file = Path(__file__).parent / "data" / "validate-dns-spec.yaml"
@@ -207,7 +180,9 @@ def validate_dns_pod(ops_test, k8s_client):
     for obj in spec:
         client.create(obj)
 
-    client.wait(Pod, "validate-dns", namespace=namespace, for_conditions=("ContainersReady",))
+    client.wait(
+        Pod, "validate-dns", namespace=namespace, for_conditions=("ContainersReady",)
+    )
     yield
     log.info("Removing DNS validation pod ...")
     for obj in spec:
@@ -216,8 +191,8 @@ def validate_dns_pod(ops_test, k8s_client):
 
 @pytest.fixture(scope="class")
 def coredns_ip(ops_test, coredns_model, k8s_client):
-    coredns_model_obj, k8s_alias = coredns_model
+    _, k8s_alias = coredns_model
     client, _ = k8s_client
     with ops_test.model_context(k8s_alias):
-        coredns_service = client.get(Service, "coredns", namespace=ops_test.model_name)
+        coredns_service = client.get(Service, "kube-dns", namespace=ops_test.model_name)
     yield coredns_service.spec.clusterIP

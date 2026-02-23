@@ -1,124 +1,209 @@
-import logging
-from string import Template
-from unittest.mock import call
+import unittest.mock as mock
 
-import ops.testing
-from lightkube.resources.apps_v1 import StatefulSet
-
-logger = logging.getLogger(__name__)
-ops.testing.SIMULATE_CAN_CONNECT = True
-
-
-def test_coredns_pebble_ready(harness, container, mocked_lightkube_client):
-    expected_plan = {
-        "services": {
-            "coredns": {
-                "override": "replace",
-                "summary": "CoreDNS",
-                "command": "/coredns -conf /etc/coredns/Corefile",
-                "startup": "enabled",
-            }
-        },
-    }
-    actual_plan = harness.get_container_pebble_plan("coredns").to_dict()
-    assert expected_plan == actual_plan
-    service = harness.model.unit.get_container("coredns").get_service("coredns")
-    assert service.is_running()
-    assert harness.model.unit.status.name == "active"
-
-    # testing that the dnsPolicy is patched via lightkube
-    patch = mocked_lightkube_client.return_value.patch
-    patch.assert_called_once_with(
-        StatefulSet,
-        name="coredns",
-        namespace="coredns-model",
-        obj={"spec": {"template": {"spec": {"dnsPolicy": "Default"}}}},
-    )
+import pytest
+from lightkube.models.core_v1 import Service
+from lightkube.models.meta_v1 import ObjectMeta
+from ops.manifests import (
+    HashableResource,
+    ManifestClientError,
+    ResourceAnalysis,
+)
+from ops.testing import Harness
 
 
-def test_coredns_pebble_ready_already_started(harness, active_container, caplog):
-    with caplog.at_level(logging.INFO):
-        harness.charm.on.coredns_pebble_ready.emit(active_container)
-    assert "CoreDNS already started" in caplog.text
+def test_action_list_versions(harness: Harness):
+    harness.begin()
+    action_event = harness.run_action("list-versions")
+    versions = action_event.results["coredns-versions"].splitlines()
+    assert sorted(versions) == [
+        "v1.12.0",
+        "v1.12.1",
+        "v1.13.1",
+    ]
 
 
-def test_config_changed(harness, active_container, caplog):
-    extra_servers = """. {
-log
-}
-"""
-    forward = "1.1.1.1"
-    domain = "some.domain"
-    corefile_template = Template(harness.model.config["corefile"])
-    corefile_base = corefile_template.safe_substitute(
-        {"domain": domain, "forward": forward, "extra_servers": ""}
-    )
-    corefile_extra = corefile_template.safe_substitute(
-        {"domain": domain, "forward": forward, "extra_servers": extra_servers}
-    )
-
-    harness.update_config({"domain": domain, "forward": forward})
-    harness.update_config({"extra_servers": extra_servers})
-
-    active_container.push.assert_has_calls(
-        [
-            call("/etc/coredns/Corefile", corefile_base, make_dirs=True),
-            call("/etc/coredns/Corefile", corefile_extra, make_dirs=True),
-        ]
-    )
-
-
-def test_config_changed_not_running(harness, inactive_container, caplog):
-    with caplog.at_level(logging.INFO):
-        harness.update_config({"forward": "1.1.1.1"})
-    assert "CoreDNS is not running" in caplog.text
-
-
-def test_dns_provider_relation_created(
-    relation_harness, relation_with_ingress, active_service, mocker
+@pytest.mark.parametrize(
+    "config_namespace,expected_namespace",
+    [
+        ("kube-system", "kube-system"),
+        ("{model}", "test-model"),
+    ],
+)
+def test_action_list_resources(
+    harness: Harness, lk_client, api_error_klass, config_namespace, expected_namespace
 ):
-    container = relation_harness.model.unit.get_container("coredns")
-    container.get_service = mocker.MagicMock(return_value=active_service)
-    relation_harness.begin_with_initial_hooks()
-    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
-        "ingress-address": "127.0.0.1",
-        "domain": "cluster.local",
-        "sdn-ip": "127.0.0.1",
-        "port": "53",
+    harness.begin()
+    harness.update_config({"coredns_namespace": config_namespace})
+    not_found = api_error_klass()
+    not_found.status.code = 404
+    not_found.status.message = "Not Found"
+    lk_client.get.side_effect = not_found
+
+    model = harness.model.name
+    uuid = harness.model.uuid[:8]
+    matching_ns = config_namespace == expected_namespace
+
+    expected_results = {
+        "coredns-missing": "\n".join(
+            [
+                "ClusterRole/juju:{}-{}:coredns".format(model, uuid),
+                "ClusterRoleBinding/juju:{}-{}:coredns".format(model, uuid),
+                f"ConfigMap/{expected_namespace}/coredns",
+                f"Deployment/{expected_namespace}/coredns",
+                f"Service/{expected_namespace}/kube-dns",
+                f"ServiceAccount/{expected_namespace}/coredns" if matching_ns else "",
+            ]
+        ).strip(),
     }
-    assert relation_harness.model.unit.status.name == "active"
+    action = harness.run_action("list-resources", {})
+    assert action.results == expected_results
+
+    action = harness.run_action("scrub-resources", {})
+    assert action.results == expected_results
+
+    action = harness.run_action("sync-resources", {})
+    assert action.results == expected_results
 
 
-def test_dns_provider_relation_created_no_ingress_address(harness):
-    # The harness fixture does not have the ingress address
-    # in its relation data by default,
-    # so it will be missing
-    harness.add_relation("dns-provider", "kubernetes-master")
-    assert harness.model.unit.status.name == "maintenance"
+def test_action_sync_resources_install_failure(harness, lk_client, api_error_klass):
+    harness.begin()
+    not_found = api_error_klass()
+    not_found.status.code = 404
+    not_found.status.message = "Not Found"
+    lk_client.get.side_effect = not_found
+
+    lk_client.apply.side_effect = ManifestClientError("API Server Unavailable")
+    action = harness.run_action("sync-resources", {})
+
+    lk_client.delete.assert_not_called()
+    assert (
+        action.results["result"]
+        == "Failed to sync missing resources: API Server Unavailable"
+    )
 
 
-def test_dns_provider_relation_created_not_running(
-    relation_harness, relation_with_ingress, inactive_service, mocker
-):
-    container = relation_harness.model.unit.get_container("coredns")
-    container.get_service = mocker.MagicMock(return_value=inactive_service)
-    relation_harness.begin_with_initial_hooks()
-    assert relation_harness.model.unit.status.name == "waiting"
+@pytest.fixture()
+def update_status_charm(harness):
+    harness.set_leader(True)
+    harness.begin()
+    rel = harness.add_relation("dns-provider", "kubernetes-control-plane")
+    harness.update_relation_data(rel, "coredns/0", {"ingress-address": "127.0.0.1"})
+    harness.charm.reconciler.stored.reconciled = True
+    with mock.patch.object(
+        harness.charm.manifest, "get_service_address"
+    ) as mock_service_address:
+        mock_service_address.return_value = "10.185.10.11"
+        yield harness.charm
 
 
-def test_domain_changed(relation_harness, relation_with_ingress, active_service, mocker):
-    container = relation_harness.model.unit.get_container("coredns")
-    container.get_service = mocker.MagicMock(return_value=active_service)
-    container.push = mocker.MagicMock()
-    relation_harness.begin_with_initial_hooks()
-    domain = "some.domain"
-    relation_harness.update_config({"domain": domain})
+def test_update_status_unready(update_status_charm):
+    with mock.patch.object(update_status_charm, "collector") as mock_collector:
+        mock_collector.unready = ["not-ready"]
+        update_status_charm.on.update_status.emit()
+    assert update_status_charm.unit.status.name == "waiting"
+    assert update_status_charm.unit.status.message == "not-ready"
 
-    # Ensure the new domain name is present in the relation data after the
-    # config is updated
-    assert relation_harness.get_relation_data(relation_with_ingress, "coredns/0") == {
-        "ingress-address": "127.0.0.1",
-        "domain": domain,
-        "sdn-ip": "127.0.0.1",
-        "port": "53",
+
+def test_update_status_no_address(update_status_charm):
+    with mock.patch.object(
+        update_status_charm.manifest, "get_service_address"
+    ) as mock_service_address:
+        mock_service_address.return_value = ""
+        update_status_charm.on.update_status.emit()
+    assert update_status_charm.unit.status.name == "waiting"
+    assert update_status_charm.unit.status.message == "Waiting for DNS service address"
+
+
+def test_update_status_ready(update_status_charm):
+    update_status_charm.stored.namespace = "default"
+    with mock.patch.object(update_status_charm, "collector") as mock_collector:
+        mock_collector.unready = []
+        mock_collector.short_version = "short-version"
+        mock_collector.long_version = "long-version"
+        update_status_charm.on.update_status.emit()
+    assert update_status_charm.unit.status.name == "active"
+    assert update_status_charm.app._backend._workload_version == "short-version"
+    assert update_status_charm.app.status.message == "long-version"
+    rel = update_status_charm.model.get_relation("dns-provider")
+    expected = {
+        ("sdn-ip", "10.185.10.11"),
+        ("port", "53"),
+        ("domain", update_status_charm.model.config["domain"]),
     }
+    assert expected.issubset(set(rel.data[update_status_charm.unit].items()))
+
+
+def test_reconcile_through_evaluate_manifests(harness):
+    harness.begin()
+    harness.enable_hooks()
+    failure = "Failed to evaluate manifests"
+    with mock.patch.object(harness.charm.manifest, "evaluate") as evaluation:
+        evaluation.return_value = failure
+        harness.set_leader(True)
+        evaluation.assert_called_once_with()
+    assert harness.charm.unit.status.name == "blocked"
+    assert harness.charm.unit.status.message == failure
+
+
+def test_reconcile_through_prevent_collisions(harness):
+    harness.begin()
+    harness.enable_hooks()
+
+    conflicts = HashableResource(
+        Service(metadata=ObjectMeta(name="coredns", namespace="kube-system"))
+    )
+    expected_results = [
+        ResourceAnalysis("coredns", {conflicts}, set(), set(), set()),
+    ]
+
+    with mock.patch.object(harness.charm.collector, "analyze_resources") as analysis:
+        analysis.return_value = expected_results
+        harness.set_leader(True)
+        analysis.assert_called_once()
+    assert harness.charm.unit.status.name == "blocked"
+    assert (
+        harness.charm.unit.status.message
+        == "1 Kubernetes resource collision (action: list-resources)"
+    )
+
+
+def test_reconcile_through_install_manifests(harness):
+    harness.begin()
+    harness.enable_hooks()
+
+    with (
+        mock.patch.object(harness.charm.collector, "analyze_resources") as analysis,
+        mock.patch.object(harness.charm.manifest, "apply_manifests") as apply,
+    ):
+        analysis.return_value = []
+        apply.side_effect = ManifestClientError("Map", "Failure", "Errors")
+        harness.set_leader(True)
+        apply.assert_called_once()
+    assert harness.charm.unit.status.name == "waiting"
+    assert harness.charm.unit.status.message == "Map -> Failure -> Errors"
+
+
+def test_reconcile_through_update_status(harness):
+    harness.begin()
+    harness.enable_hooks()
+
+    with (
+        mock.patch.object(harness.charm.collector, "analyze_resources") as analysis,
+        mock.patch.object(harness.charm, "_update_status") as update_status,
+        mock.patch.object(harness.charm.manifest, "apply_manifests"),
+    ):
+        analysis.return_value = []
+        harness.set_leader(True)
+        update_status.assert_called_once_with()
+    assert harness.charm.unit.status.name == "active"
+    assert harness.charm.unit.status.message == "Ready"
+
+
+def test_reconcile_through_destroying(harness):
+    harness.begin()
+    harness.set_leader(True)
+    harness.enable_hooks()
+
+    harness.charm.on.stop.emit()
+    assert harness.charm.unit.status.name == "blocked"
+    assert harness.charm.unit.status.message == "Removing CoreDNS"
