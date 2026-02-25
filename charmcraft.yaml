@@ -162,4 +162,4 @@ resources:
   coredns-image:
     type: oci-image
     description: Workload container image for CoreDNS (no longer used)
-    upstream-source: google/pause:latest
+    upstream-source: registry.k8s.io/pause:latest
