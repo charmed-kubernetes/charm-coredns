@@ -53,6 +53,20 @@ config:
       description: Memory limit for each CoreDNS pod.
       type: string
       default: 170Mi
+    topology_spread_constraints:
+      description: |-
+        Topology spread constraints for CoreDNS pods, in YAML list format.
+        This controls how pods are distributed across failure domains
+        (e.g. nodes, zones) to improve high availability when multiple
+        replicas are deployed.  Set to '' to disable.
+      type: string
+      default: |
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              k8s-app: kube-dns
     coredns_namespace:
       description: |-
         An existing namespace to deploy CoreDNS into.
