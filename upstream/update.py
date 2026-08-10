@@ -27,7 +27,7 @@ GH_TAGS = "https://api.github.com/repos/{repo}/tags"
 GH_BRANCH = "https://api.github.com/repos/{repo}/branches/{branch}"
 GH_COMMIT = "https://api.github.com/repos/{repo}/commits/{sha}"
 GH_RAW = "https://raw.githubusercontent.com/{repo}/{branch}/{path}/{rel}/{manifest}"
-ROCKS_CC = "upload.rocks.canonical.com:5000/cdk"
+GHCR_CDK = "ghcr.io/canonical/cdk"
 
 
 def _ver_maker(v: str) -> Tuple[int, ...]:
@@ -342,7 +342,7 @@ def get_argparser():
     )
     parser.add_argument(
         "--registry",
-        default=ROCKS_CC,
+        default=GHCR_CDK,
         type=str,
         help="Registry to which images should be mirrored.\n\n"
         "example\n"
