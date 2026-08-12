@@ -6,12 +6,18 @@ import hashlib
 import json
 import logging
 from string import Template
-from typing import Dict, Optional, Type, TypeVar
+from typing import Dict, List, Optional, Type, TypeVar
 
+import yaml
 from httpx import HTTPError
 from lightkube.core.resource import NamespacedResource
 from lightkube.models.apps_v1 import Deployment
-from lightkube.models.core_v1 import ConfigMap, Service, ServiceAccount
+from lightkube.models.core_v1 import (
+    ConfigMap,
+    Service,
+    ServiceAccount,
+    TopologySpreadConstraint,
+)
 from lightkube.models.rbac_v1 import ClusterRole, ClusterRoleBinding
 from lightkube.resources.core_v1 import Service as Service_Res
 from ops.manifests import ConfigRegistry, ManifestLabel, Manifests, Patch
@@ -106,6 +112,9 @@ class AdjustDeployment(Patch):
         memory_limit = self.manifests.config.get("coredns_memory_limit", "170Mi")
         obj.spec.replicas = self.manifests.config.get("coredns_replicas", 1)
         obj.spec.template.spec.automountServiceAccountToken = True
+        obj.spec.template.spec.topologySpreadConstraints = (
+            self._topology_spread_constraints
+        )
         assert len(containers) == 1
         container = containers[0]
         assert container.resources.limits
@@ -113,6 +122,19 @@ class AdjustDeployment(Patch):
             f"Setting memory limit for container {container.name} to {memory_limit}"
         )
         container.resources.limits["memory"] = memory_limit
+
+    @property
+    def _topology_spread_constraints(self) -> Optional[List[TopologySpreadConstraint]]:
+        """Return the list of TopologySpreadConstraints from config, or None if unset."""
+        tsc_yaml = self.manifests.config.get("topology_spread_constraints", "")
+        if not tsc_yaml:
+            return None
+        tsc_data = yaml.safe_load(tsc_yaml)
+        if not isinstance(tsc_data, list):
+            log.warning("topology_spread_constraints is not a YAML list; ignoring")
+            return None
+        log.debug("Applying %d topology spread constraint(s)", len(tsc_data))
+        return [TopologySpreadConstraint.from_dict(tsc) for tsc in tsc_data]
 
 
 class AdjustService(Patch):
