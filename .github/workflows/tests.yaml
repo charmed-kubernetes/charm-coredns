@@ -29,7 +29,7 @@ jobs:
           charmcraft-channel: ${{ steps.charmcraft.outputs.channel }}
           clouds-yaml: ${{ secrets.CLOUDS_YAML }}
           bootstrap-constraints: "arch=amd64 cores=2 mem=4G"
-          bootstrap-options: "${{ secrets.JAMMY_BOOTSTRAP_OPTIONS }} --model-default datastore=vsanDatastore --model-default primary-network=VLAN_2763 --config caas-image-repo=rocks.canonical.com/cdk/jujusolutions"
+          bootstrap-options: "${{ secrets.JAMMY_BOOTSTRAP_OPTIONS }} --model-default datastore=vsanDatastore --model-default primary-network=VLAN_2763 --config caas-image-repo=ghcr.io/canonical/cdk/jujusolutions"
           juju-channel: 3/stable
       - name: Run test
         run: tox -e integration -- ${EXTRA_ARGS}
