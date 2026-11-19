@@ -45,7 +45,6 @@ config:
     coredns_release:
       description: The CoreDNS release to deploy.
       type: string
-      default: v1.14.2
     coredns_replicas:
       description: Number of CoreDNS replicas to deploy.
       type: int

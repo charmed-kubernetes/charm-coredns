@@ -210,26 +210,3 @@ def test_reconcile_through_destroying(harness):
     harness.charm.on.stop.emit()
     assert harness.charm.unit.status.name == "blocked"
     assert harness.charm.unit.status.message == "Removing CoreDNS"
-
-
-def test_schema_default_refresh_reapplies_manifests(harness):
-    """Refreshing onto a new default release re-applies the manifests."""
-    harness.set_leader(True)
-    harness.begin()
-    charm, manifest = harness.charm, harness.charm.manifest
-    new_default = manifest.config["release"]
-    assert new_default == manifest.default_release, "schema and version file differ"
-    previous = next(r for r in manifest.releases if r != new_default)
-
-    # Previous charm revision: coredns_release unset, default from its version file
-    harness.update_config({"coredns_release": ""})
-    with mock.patch.dict(manifest.__dict__, {"default_release": previous}):
-        assert manifest.current_release == previous
-        charm.stored.config_hash = charm.evaluate_manifests()
-
-    # Refresh: coredns_release reverts to the new schema default
-    harness.update_config(unset=["coredns_release"])
-    with mock.patch.object(manifest, "apply_manifests") as apply:
-        charm.install_manifests(config_hash=charm.evaluate_manifests())
-    apply.assert_called_once_with()
-    assert manifest.current_release == new_default
