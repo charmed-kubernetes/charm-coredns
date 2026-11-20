@@ -49,3 +49,19 @@ def test_namespace_config(harness, manifest):
     with pytest.raises(KeyError):
         manifest.resources
     assert "coredns_namespace" in manifest.evaluate()
+
+
+@pytest.mark.parametrize("release", ["v1.11.3", "v1.14.2", "v1.14.6"])
+def test_release_pin_and_reset(harness, manifest, release):
+    for configured, expected in (
+        (None, "v1.13.1"),
+        (release, release),
+        (None, "v1.13.1"),
+    ):
+        if configured is None:
+            harness.update_config(unset=["coredns_release"])
+        else:
+            harness.update_config({"coredns_release": configured})
+        deployment = next(obj for obj in manifest.resources if obj.kind == "Deployment")
+        image = deployment.resource.spec.template.spec.containers[0].image
+        assert image.rsplit(":", 1)[1] == expected
