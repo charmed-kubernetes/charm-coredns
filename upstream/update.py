@@ -233,6 +233,7 @@ def gather_releases(source: str) -> Tuple[str, Set[Release]]:
                 for item in resp
                 if (
                     VERSION_RE.match(item)
+                    and VersionInfo.is_valid(item[1:])
                     and not version_parser(item[1:]).prerelease
                     and version_parser(context["minimum"][1:])
                     <= version_parser(item[1:])
