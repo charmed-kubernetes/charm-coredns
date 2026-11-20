@@ -6,6 +6,4 @@ pytest-cov
 pytest-operator
 pytest-asyncio
 pytest-mock
-# pytest-operator 0.43.2 pins pytest-asyncio<0.23, which breaks on pytest 9.2.0;
-# drop once pytest-operator/pytest-asyncio support pytest>=9.2.
 pytest<9.2
